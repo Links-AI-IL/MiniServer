@@ -21,20 +21,25 @@ headers = {
 
 @app.route('/query', methods=['POST'])
 def ask_claude():
-    data = request.get_json()
-    user_question = data.get("question")
+    data = request.get_json() or {}
+    
+    messages = data.get("messages")
+
+    if not messages:
+        user_question = data.get("question", "")
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": user_question}]}
+        ]
 
     payload = {
         "model": MODEL,
         "system": PROMPT,
-        "messages": [
-            {"role": "user", "content": user_question}
-        ],
+        "messages": messages,
         "max_tokens": MAX_TOKENS,
         "stream": False
     }
 
-    response = requests.post(CLAUDE_API_URL, headers=headers, json=payload)
+    response = requests.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=30)
     return jsonify(response.json())
 
 if __name__ == '__main__':
