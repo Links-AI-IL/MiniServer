@@ -2,7 +2,9 @@
   "name": "יוסי",
   "age": 4,
   "gender": "בן",
-  "likes": [],
+  "likes": [
+    "מכוניות צעצוע"
+  ],
   "dislikes": [],
   "parent_name": null,
   "pronouns": null,
