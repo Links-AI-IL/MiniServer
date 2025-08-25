@@ -4,3 +4,4 @@ SQLAlchemy==2.0.0
 requests==2.26.0
 gunicorn
 pytz
+typing-extensions>=4.6.0
