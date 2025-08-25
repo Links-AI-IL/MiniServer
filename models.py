@@ -1,11 +1,10 @@
 import datetime
 import pytz
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import String, Text, DateTime, func, Integer
 
-class Base(DeclarativeBase):
-    """בסיס ORM של SQLAlchemy 2.x"""
-    pass
+Base = declarative_base()
 
 class ConvoChunk(Base):
     __tablename__ = "convo_chunks"
