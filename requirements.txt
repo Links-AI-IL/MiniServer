@@ -1,5 +1,5 @@
-Flask>=2.0.0
+Flask==2.0.3
+Werkzeug==2.0.3
 SQLAlchemy==1.4.36
 requests==2.26.0
 gunicorn
-Werkzeug>=2.0.0
