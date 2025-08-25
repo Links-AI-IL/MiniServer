@@ -1,0 +1,19 @@
+{
+  "name": "עידו",
+  "age": 7,
+  "gender": "בן",
+  "likes": [
+    "לצייר",
+    "לצבוע",
+    "בתים",
+    "גינה",
+    "עצים",
+    "להתגלש"
+  ],
+  "dislikes": [
+    "ים"
+  ],
+  "parent_name": null,
+  "pronouns": null,
+  "core_collected": true
+}

@@ -1,54 +1,30 @@
 from flask import Flask, request, jsonify
 import requests, os
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models import Base, ConvoChunk
 import time
 from concurrent.futures import ThreadPoolExecutor
 import json
 import tempfile
 import re
-from datetime import datetime
-import pytz
+from requests.adapters import HTTPAdapter
+from sqlalchemy import create_engine, or_
+from sqlalchemy.orm import sessionmaker
+from models import Base, ConvoChunk
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import and_
+
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-CORE_FIELDS = ("name", "age", "gender")
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 PROFILES_DIR = os.path.join(BASE_DIR, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
 
 _ALLOWED_PROFILE_KEYS = {
-    "name", "age", "gender", "nickname",
-    "likes", "dislikes", "parent_name", "pronouns"
+    "name", "age", "gender",
+    "likes", "dislikes", "parent_name", "pronouns",
+    "recent_summary"
 }
-
-http = requests.Session()
-
-bg = ThreadPoolExecutor(max_workers=2)
-
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
-
-app = Flask(__name__)
-
-app.config.from_pyfile("config.py", silent=True)
-
-app.config.from_mapping({
-    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620"),
-    "MAX_TOKENS": int(app.config.get("MAX_TOKENS", 500)),
-    "PORT": int(app.config.get("PORT", 5001)),
-    "DB_URL": app.config.get("DB_URL", "sqlite:///rag.db"),
-})
-
-print("Loaded ANTHROPIC_API_KEY:", "YES" if app.config.get("ANTHROPIC_API_KEY") else "NO")
-
-engine = create_engine(app.config["DB_URL"], echo=False, future=True)
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-Base.metadata.create_all(engine)
-
-CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 PROMPT = (
     "אתה דמות של דובי פַּנְדָּה חברותי בשם פֶּנְדִּי. דבר ישירות בגובה עיניים לילדים בני 3–6.\n"
@@ -56,7 +32,7 @@ PROMPT = (
     "הוסף ניקוד מלא ומדויק לכל מילה, בהתאם למגדר הילד.\n"
     "משפטים קצרים: 4–6 מילים בכל משפט.\n"
     "בלי אימוג׳ים ובלי סימנים מיותרים.\n"
-    "לאחר מכן קרא לילד בשמו אם ידוע.\n"
+    "קרא לילד בשמו אם ידוע.\n"
     "ענה בתשובות מפורטות ומורחבות, לפחות 3–5 משפטים בכל תשובה.\n"
     "סגנון חם, סבלני ואוהב; עודד בעדינות והימנע מביקורת.\n"
     "הצע משחקי דמיון, סיפורים ושירים פשוטים.\n"
@@ -64,19 +40,79 @@ PROMPT = (
     "זהה ואשר רגשות; הצע הפסקות כשצריך."
 )
 
-def missing_core_fields(profile: dict) -> list[str]:
-    return [k for k in CORE_FIELDS if not profile.get(k)]
+http = requests.Session()
 
-def build_profile_collect_instruction(missing: list[str]) -> str:
-    readable = ", ".join({"name": "שם", "age": "גיל", "gender": "מגדר"}[k] for k in missing)
+adapter = HTTPAdapter(
+    pool_connections=20,
+    pool_maxsize=50,
+    max_retries=0 
+)
+
+http.mount("https://", adapter)
+http.mount("http://", adapter)
+http.headers.update({"Connection": "keep-alive"})
+
+bg = ThreadPoolExecutor(max_workers=6, thread_name_prefix="bg")
+
+app = Flask(__name__)
+
+# Load data - api key, model...
+app.config.from_pyfile("config.py", silent=True)
+
+cfg_db_url = app.config.get("DB_URL")
+db_abs = os.path.join(BASE_DIR, "rag.db")
+
+if not cfg_db_url:
+    app.config["DB_URL"] = f"sqlite:///{db_abs}"
+
+elif cfg_db_url.startswith("sqlite:///") and not cfg_db_url.startswith("sqlite:////"):
+    rel = cfg_db_url.replace("sqlite:///", "", 1)
+
+    app.config["DB_URL"] = f"sqlite:///{os.path.join(BASE_DIR, rel)}"
+
+app.config.from_mapping({
+    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620"),
+    "MAX_TOKENS": int(app.config.get("MAX_TOKENS", 500)),
+    "PORT": int(app.config.get("PORT", 5001)),
+    "DB_URL": app.config["DB_URL"]
+})
+
+engine = create_engine(
+    app.config["DB_URL"],
+    echo=False,
+    future=True,
+    connect_args={"check_same_thread": False} if app.config["DB_URL"].startswith("sqlite") else {}
+    )
+
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+Base.metadata.create_all(engine)
+
+print("Panda server is running")
+
+# Healthz test to api
+@app.get("/healthz")
+def healthz():
+    if not app.config.get("ANTHROPIC_API_KEY"):
+        return jsonify(status="error", error="ANTHROPIC_API_KEY missing"), 500
+    return jsonify("Panda server is working!")
+
+# Return miss profile details
+def profile_collect_instruction(profile: dict) -> str | None:
+    field_labels = {"name": "שם", "age": "גיל", "gender": "מגדר"}
+    missing = [k for k in ("name", "age", "gender") if not profile.get(k)]
+    if not missing:
+        return None
+    readable = ", ".join(field_labels[k] for k in missing)
     return (
         "חסרים בפרופיל המשתמש: " + readable + ". "
-        "שאל בעדינות לאט ובדרך אגב, שאלה אחת בכל פעם, כדי לאסוף רק את השדות החסרים. "
+        "שאל בעדינות, שאלה אחת בכל פעם, כדי לאסוף רק את השדות החסרים. "
         "השתמש במשפט קצר ומנוקד. "
         "אחרי שקיבלת תשובה, אל תשאל שוב על אותו שדה. "
         "אל תבקש פרטים מזהים נוספים."
     )
 
+# Collect message or messages
 def _normalize_messages(messages, question):
     if messages and isinstance(messages, list):
         return messages
@@ -85,24 +121,22 @@ def _normalize_messages(messages, question):
         return None
     return [{"role": "user", "content": [{"type": "text", "text": q}]}]
 
-
+# Get clean text to context
 def _extract_text_blocks(content_list):
-    """מקבל content מ-Anthropic ומחזיר טקסט מאוחד."""
     out = []
     for b in content_list or []:
         if isinstance(b, dict) and b.get("type") == "text":
             out.append(b.get("text", ""))
     return "\n".join([t for t in out if t])
 
-
+# Get last message from user 
 def _last_user_text_from_messages(built_messages):
-    """מחלץ את טקסט המשתמש האחרון שנשלח למודל (לשמירה ב-DB)."""
     for msg in reversed(built_messages):
         if msg.get("role") == "user":
             return _extract_text_blocks(msg.get("content"))
     return ""
 
-
+# Save messages to DB in background
 def _persist_interaction_async(device_id: str, user_text: str, assistant_text: str):
     """שמירה ל-DB ברקע: לא חוסם את מסלול התשובה."""
     db = SessionLocal()
@@ -123,29 +157,114 @@ def _persist_interaction_async(device_id: str, user_text: str, assistant_text: s
         except Exception:
             pass
 
+# General headers
+def anthropic_headers():
+    return {
+        "x-api-key": app.config["ANTHROPIC_API_KEY"],
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "prompt-caching-2024-07-31",
+        "Content-Type": "application/json"
+    }
 
-@app.get("/healthz")
-def healthz():
-    if not app.config.get("ANTHROPIC_API_KEY"):
-        return jsonify(status="error", error="ANTHROPIC_API_KEY missing"), 500
-    return jsonify(status="ok")
+# # Insert last query to prompt
+# def _inject_last_assistant_turn(built_msgs, profile: dict):
+#     if not built_msgs or built_msgs[0].get("role") != "user":
+#         return built_msgs
+
+#     rs = profile.get("recent_summary")
+#     if not rs:
+#         return built_msgs
+
+#     try:
+#         js = json.loads(rs)
+#     except Exception:
+#         return built_msgs
+
+#     anchor_assistant = (js.get("open_question") or js.get("last_assistant") or "").strip()
+#     anchor_user = (js.get("last_user") or "").strip()
+
+#     if not anchor_assistant and not anchor_user:
+#         return built_msgs
+
+#     injected = [{
+#         "role": "assistant",
+#         "content": [{"type": "text", "text": anchor_assistant[:400]}]
+#     }]
+
+#     curr_user = _last_user_text_from_messages(built_msgs).strip()
+#     if anchor_user and anchor_user != curr_user:
+#         injected.append({
+#             "role": "user",
+#             "content": [{"type": "text", "text": anchor_user[:400]}]
+#         })
+
+#     return injected + built_msgs
+
+# Create JSON object of 3 details
+def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
+
+    current_user = (_last_user_text_from_messages(built_msgs) or "").strip()[:400]
+
+    last_user = ""
+    last_assistant = ""
+
+    if (not last_user or not last_assistant) and profile.get("device_id"):
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(ConvoChunk)
+                  .filter(ConvoChunk.device_id == profile["device_id"])
+                  .order_by(ConvoChunk.id.desc())
+                  .limit(8)
+                  .all()
+            )
+        finally:
+            db.close()
+
+        if not last_assistant:
+            for r in rows:
+                if r.role == "assistant" and (r.text or "").strip():
+                    last_assistant = (r.text or "").strip()[:400]
+                    break
+
+        if not last_user:
+            for r in rows:
+                if r.role == "user":
+                    cand = (r.text or "").strip()
+                    if cand and cand != current_user:
+                        last_user = cand[:400]
+                        break
+
+    if not (last_user or last_assistant or current_user):
+        return None
+
+    obj = {
+        "last_user": last_user or None,
+        "last_assistant": last_assistant or None,
+        "current_user": current_user or None,
+    }
+    return json.dumps(obj, ensure_ascii=False)
 
 
+# Send query to api
 @app.post("/query")
 def query():
     if not app.config.get("ANTHROPIC_API_KEY"):
         return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 500
 
     data = request.get_json(force=True) or {}
-    device_id = (data.get("device_id") or "dev").strip()
 
+    device_id = (data.get("device_id") or "dev").strip()
     messages = data.get("messages")
     question = data.get("question")
+
     built = _normalize_messages(messages, question)
     if not built:
         return jsonify({"error": "missing messages or question"}), 400
     
     profile = load_profile(device_id)
+    profile["device_id"] = device_id
+
     profile_ctx = format_profile_for_system(profile)
 
     to_system = [
@@ -153,20 +272,27 @@ def query():
         {"type": "text", "text": profile_ctx},
     ]
 
-    if not profile.get("core_collected"):
-        missing = [k for k in ("name", "age", "gender") if not profile.get(k)]
-        if missing:
-            to_system.append({
-                "type": "text",
-                "text": build_profile_collect_instruction(missing)
-            })
+    # built = _inject_last_assistant_turn(built, profile)
 
-    headers = {
-        "x-api-key": app.config["ANTHROPIC_API_KEY"],
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "prompt-caching-2024-07-31",
-        "Content-Type": "application/json"
-    }
+    lt_json = _build_last_turn_json(profile, built)
+    if lt_json:
+        to_system.append({
+            "type": "text",
+            "text": (
+                "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
+            )
+        })
+        
+    print("last-turn-json:", lt_json)
+
+    instr = profile_collect_instruction(profile)
+    if instr:
+        to_system.append({"type": "text", "text": instr})
+
+    headers = anthropic_headers()
+
+    print(f"to system = {to_system}")
+
     payload = {
         "model": app.config["ANTHROPIC_MODEL"],
         "system": to_system,
@@ -177,7 +303,8 @@ def query():
 
     t0 = time.perf_counter()
     try:
-        r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(5, 45))
+        r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(4, 25))
+        print(f"[anthropic-status] {r.status_code}")
     except requests.RequestException as e:
         return jsonify({"error": "LLM upstream error", "detail": str(e)}), 502
 
@@ -195,9 +322,18 @@ def query():
     resp_json = r.json()
 
     user_text = _last_user_text_from_messages(built)
+
     assistant_text = _extract_text_blocks(resp_json.get("content"))
 
-    bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
+    # bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
+    
+    # bg.submit(summarize_recent, device_id)
+
+    fut = bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
+    
+    fut.add_done_callback(lambda _:
+        bg.submit(prune_conversation, device_id)
+    )
 
     if user_text:
         bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
@@ -205,6 +341,7 @@ def query():
     return jsonify(resp_json)
 
 
+# Debug last message
 @app.get("/debug/chunks")
 def debug_chunks():
     device_id = request.args.get("device_id", "dev")
@@ -235,6 +372,7 @@ def debug_chunks():
         db.close()
 
 
+# Debug load config
 @app.get("/debug/config")
 def debug_config():
     import os
@@ -249,18 +387,18 @@ def debug_config():
     })
 
 
-def _safe_id(device_id: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_\-\.]", "_", device_id or "dev")
+# Clean device id
+def profile_path(device_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", device_id or "dev")
+    return os.path.join(PROFILES_DIR, f"{safe}.json")
 
-def _profile_path(device_id: str) -> str:
-    return os.path.join(PROFILES_DIR, f"{_safe_id(device_id)}.json")
 
+# Load json profile
 def load_profile(device_id: str) -> dict:
-    path = _profile_path(device_id)
+    path = profile_path(device_id)
     if not os.path.exists(path):
         return {
             "name": None, "age": None, "gender": None,
-            "nickname": None,
             "likes": [], "dislikes": [],
             "parent_name": None, "pronouns": None
         }
@@ -273,11 +411,9 @@ def load_profile(device_id: str) -> dict:
     except Exception:
         return {}
 
+
+# Save and update user profile
 def save_profile(device_id: str, patch: dict) -> dict:
-    """שומר פרופיל באופן אטומי, עם merge לא הורס:
-    - לא דורך על ערכים קיימים אם הגיע None/ריק
-    - likes/dislikes: מאחד לרשימה ייחודית (לא מוחק קיימים)
-    """
     current = load_profile(device_id)
 
     cleaned = {}
@@ -291,7 +427,7 @@ def save_profile(device_id: str, patch: dict) -> dict:
             except Exception:
                 v = None
 
-        elif k in {"name", "nickname", "gender", "parent_name", "pronouns"}:
+        elif k in {"name", "gender", "parent_name", "pronouns"}:
             if v is None:
                 v = None
             else:
@@ -304,6 +440,8 @@ def save_profile(device_id: str, patch: dict) -> dict:
                 v = [v.strip()[:40]] if v.strip() else []
             else:
                 v = []
+        elif k == "recent_summary":
+            v = (str(v).strip()[:800] or None) if v is not None else None
         cleaned[k] = v
 
     merged = dict(current or {})
@@ -324,7 +462,7 @@ def save_profile(device_id: str, patch: dict) -> dict:
 
     merged["core_collected"] = all(bool(merged.get(k)) for k in ("name", "age", "gender"))
 
-    path = _profile_path(device_id)
+    path = profile_path(device_id)
     tmp_fd, tmp_path = tempfile.mkstemp(prefix="profile_", suffix=".json", dir=PROFILES_DIR)
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
@@ -339,27 +477,122 @@ def save_profile(device_id: str, patch: dict) -> dict:
 
     return merged
 
+# Create user profile to context
 def format_profile_for_system(p: dict) -> str:
-    """ממזער לפרומפט: מידע קצר ורלוונטי בלבד."""
-    parts = []
-    if p.get("name"): parts.append(f"שם הילד/ה: {p['name']}.")
-    if p.get("age"): parts.append(f"גיל: {p['age']}.")
-    if p.get("gender"): parts.append(f"מגדר: {p['gender']}.")
-    if p.get("nickname"): parts.append(f"כינוי: {p['nickname']}.")
-    if p.get("likes"):
-        parts.append("מה אוהב/ת: " + " ,".join(p["likes"][:5]) + ".")
-    if p.get("dislikes"):
-        parts.append("מה פחות אוהב/ת: " + " ,".join(p["dislikes"][:5]) + ".")
-    if p.get("parent_name"):
-        parts.append(f"שם הורה: {p['parent_name']}.")
-    parts.append("דבר תמיד בצורה אישית, פנה בשם הידוע אם קיים.")
-    return "פרופיל משתמש:\n" + " ".join(parts)
+    name = p.get("name"); age = p.get("age"); gender = p.get("gender")
+    return f"פרופיל משתמש: שם: {name or 'לא ידוע'}, גיל: {age or 'לא ידוע'}, מגדר: {gender or 'לא ידוע'}."
 
+
+# Get profile
 @app.get("/profile")
 def get_profile():
     device_id = (request.args.get("device_id") or "dev").strip()
     return jsonify(load_profile(device_id))
 
+
+# Clean old DB
+def prune_conversation(device_id: str):
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+
+        keep_rows = (
+            db.query(ConvoChunk.id)
+              .filter(ConvoChunk.device_id == device_id)
+              .order_by(ConvoChunk.id.desc())
+              .limit(10)
+              .all()
+        )
+        keep_ids = [r.id for r in keep_rows] or [-1] 
+
+        if keep_ids:
+            db.query(ConvoChunk).filter(
+                ConvoChunk.device_id == device_id,
+                and_(ConvoChunk.ts < cutoff, ~ConvoChunk.id.in_(keep_ids))
+            ).delete(synchronize_session=False)
+        else:
+            db.query(ConvoChunk).filter(
+                ConvoChunk.device_id == device_id,
+                ConvoChunk.ts < cutoff
+            ).delete(synchronize_session=False)
+
+        db.commit()
+        print("delete successfully")
+    finally:
+        db.close()
+
+# Summary last messages in background
+# def summarize_recent(device_id: str):
+#     """רץ ברקע – מייצר תקציר קצר של ההודעות האחרונות (עד 10 הודעות או 6 שעות)
+#     ושומר בפרופיל תחת recent_summary. לא חוסם את מסלול התשובה.
+#     """
+#     cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+
+#     db = SessionLocal()
+#     try:
+#         rows = (
+#             db.query(ConvoChunk)
+#               .filter(ConvoChunk.device_id == device_id, ConvoChunk.ts >= cutoff)
+#               .order_by(ConvoChunk.id.asc())
+#               .all()
+#         )
+#         if not rows:
+#             rows = (
+#                 db.query(ConvoChunk)
+#                   .filter(ConvoChunk.device_id == device_id)
+#                   .order_by(ConvoChunk.id.desc())
+#                   .limit(10)
+#                   .all()
+#             )[::-1] 
+#     finally:
+#         db.close()
+
+#     if not rows:
+#         return
+
+#     lines = []
+#     for r in rows[-10:]:
+#         role = "ילד" if r.role == "user" else "פֶּנְדִּי"
+#         snippet = (r.text or "").strip()
+#         if len(snippet) > 240:
+#             snippet = snippet[:240] + "…"
+#         lines.append(f"{role}: {snippet}")
+#     convo_text = "\n".join(lines)
+
+#     payload = {
+#         "model": app.config["ANTHROPIC_MODEL"],
+#         "system": [{
+#             "type": "text",
+#             "text": (
+#             "החזר JSON חוקי בלבד (בלי טקסט נוסף) המסכם את הדיאלוג האחרון לשימוש כקונטקסט.\n"
+#             "פורמט:\n"
+#             "{\n"
+#             '  "topic": string, // חובה לא-ריק; אם לא ברור כתוב "שיחת פתיחה\n'
+#             '  "last_user": string|null,\n'
+#             '  "last_assistant": string|null,\n'
+#             '  "open_question": string|null,  // אם העוזר שאל משהו שממתין לתשובה – רשום את השאלה המדויקת\n'
+#             '  "facts": [string],             // 2–4 עובדות קצרות ורלוונטיות\n'
+#             '  "preferences": [string],       // העדפות/אהבות שהוזכרו עכשיו\n'
+#             "}\n"
+#             "חובה: אם העוזר סיים בשאלה – מלא open_question במדויק. אחרת null."
+#             )
+#         }],
+#         "messages": [{"role": "user", "content": [{"type": "text", "text": convo_text}]}],
+#         "max_tokens": 120,
+#         "temperature": 0.0,
+#         "stream": False
+#     }
+#     try:
+#         r = http.post(CLAUDE_API_URL, headers=anthropic_headers(), json=payload, timeout=(4, 15))
+#         if r.status_code // 100 != 2:
+#             return
+#         summary = _extract_text_blocks(r.json().get("content"))
+#         if summary:
+#             save_profile(device_id, {"recent_summary": summary})
+#     except Exception:
+#         pass
+
+# Create user profile by device id
 @app.post("/profile")
 def upsert_profile():
     data = request.get_json(force=True) or {}
@@ -372,21 +605,20 @@ def upsert_profile():
     merged = save_profile(device_id, profile_patch)
     return jsonify({"ok": True, "profile": merged})
 
+
+# Extracting profile from user - in background
 def _maybe_extract_profile_async(device_id: str, user_text: str, current_profile: dict):
-    miss = missing_core_fields(current_profile)
+    miss = [k for k in ("name", "age", "gender") if not current_profile.get(k)]
     should_try = bool(miss) or any(not current_profile.get(k) for k in ("likes", "dislikes"))
     if not should_try or not user_text:
         return
 
-    headers = {
-        "x-api-key": app.config["ANTHROPIC_API_KEY"],
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json"
-    }
+    headers = anthropic_headers()
+
     extractor_system = (
         "אתה מחלץ פרטי פרופיל מילד מטקסט חופשי. החזר JSON חוקי בלבד, ללא טקסט נוסף. "
         "השדות המותרים: name (string), age (int), gender (\"בן\"/\"בת\"/null), "
-        "nickname (string|null), likes (list of strings), dislikes (list of strings). "
+        "likes (list of strings), dislikes (list of strings). "
         "אם לא בטוח — השאר null/רשימה ריקה."
     )
     extractor_messages = [
@@ -401,7 +633,7 @@ def _maybe_extract_profile_async(device_id: str, user_text: str, current_profile
         "stream": False
     }
     try:
-        resp = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(5, 30))
+        resp = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(4, 15))
         if resp.status_code // 100 != 2:
             return
         ans = resp.json()
