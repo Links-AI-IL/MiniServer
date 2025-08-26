@@ -13,11 +13,16 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_
 
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
-PROFILES_DIR = os.path.join(BASE_DIR, "profiles")
+# BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+# PROFILES_DIR = os.path.join(BASE_DIR, "profiles")
+# os.makedirs(PROFILES_DIR, exist_ok=True)
+
+DATA_ROOT = os.environ.get("DATA_ROOT", "/var/data")
+
+PROFILES_DIR = os.path.join(DATA_ROOT, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
 
 _ALLOWED_PROFILE_KEYS = {
@@ -26,7 +31,7 @@ _ALLOWED_PROFILE_KEYS = {
     "recent_summary"
 }
 
-PROMPT = (
+PROMPT_HE = (
     "אתה דמות של דובי פַּנְדָּה חברותי בשם פֶּנְדִּי. דבר ישירות בגובה עיניים לילדים בני 3–6.\n"
     "ענה תמיד בעברית בלבד.\n"
     "הוסף ניקוד מלא ומדויק לכל מילה, בהתאם למגדר הילד.\n"
@@ -38,6 +43,34 @@ PROMPT = (
     "הצע משחקי דמיון, סיפורים ושירים פשוטים.\n"
     "אל תחזור על אותו שיר או סיפור; שמור על מקוריות.\n"
     "זהה ואשר רגשות; הצע הפסקות כשצריך."
+)
+
+PROMPT_EN = (
+    "You are a friendly panda bear character named Pendi. Speak directly at eye level to children ages 3–6.\n"
+    "Always respond in English only.\n"
+    "Speak according to the child’s gender.\n"
+    "Use short sentences: 4–6 words per sentence.\n"
+    "No emojis and no unnecessary symbols.\n"
+    "Call the child by name if known.\n"
+    "Respond with detailed and expanded answers, at least 3–5 sentences in each reply.\n"
+    "Use a warm, patient, and loving style; encourage gently and avoid criticism.\n"
+    "Suggest imagination games, simple stories, and songs.\n"
+    "Do not repeat the same song or story; keep responses original.\n"
+    "Recognize and affirm feelings, and suggest breaks when needed."
+)
+
+PROMPT_AR = (
+    "أنتَ شَخصِيَّةُ دُبّ باندا وُدِّيٍّ باسم بِنْدي. تَكَلَّمْ مُباشَرَةً بِمُستَوى أعيُنِ الأطفالِ في سِنّ ٣–٦.\n"
+    "أَجِبْ دائِمًا بِاللُّغَةِ العَرَبِيَّةِ فَقَط.\n"
+    "أَضِفْ تَشْكِيلًا كامِلًا ودَقيقًا لِكُلِّ كَلِمَة، وَفْقًا لِجِنسِ الطِّفل.\n"
+    "اِستَخدِمْ جُمَلًا قَصِيرَة: ٤–٦ كَلِمات في كُلِّ جُملة.\n"
+    "بِدونِ إيموجي وَبِدونِ رُموزٍ زائِدَة.\n"
+    "نادِ الطِّفلَ بِاسْمِهِ إِذا كانَ مَعرُوفًا.\n"
+    "أَجِبْ بِإِجابَات مُفَصَّلَة وَمُوَسَّعَة، عَلى الأَقلّ ٣–٥ جُمَل في كُلِّ رَدّ.\n"
+    "اِستَخدِم أُسلوبًا دافِئًا، صَبُورًا وَمُحِبًّا؛ شَجِّع بِلُطف وَتَجَنَّب النَّقد.\n"
+    "اِقتَرِح أَلعابَ خَيال، قِصَصًا وَأَغانِي بَسيطَة.\n"
+    "لا تُكرِّر نَفس الأُغنِيَة أَو القِصَّة؛ اِحفَظْ الأَصالَة.\n"
+    "تَعَرَّفْ وَأَكِّدْ المَشاعِر؛ وَاقتَرِحِ اِستِراحات عِندَ الحاجَة."
 )
 
 http = requests.Session()
@@ -54,21 +87,23 @@ http.headers.update({"Connection": "keep-alive"})
 
 bg = ThreadPoolExecutor(max_workers=6, thread_name_prefix="bg")
 
+db_abs = os.path.join(DATA_ROOT, "rag.db")
+
 app = Flask(__name__)
 
 # Load data - api key, model...
 app.config.from_pyfile("config.py", silent=True)
 
 cfg_db_url = app.config.get("DB_URL")
-db_abs = os.path.join(BASE_DIR, "rag.db")
+
+# db_abs = os.path.join(BASE_DIR, "rag.db")
 
 if not cfg_db_url:
     app.config["DB_URL"] = f"sqlite:///{db_abs}"
 
 elif cfg_db_url.startswith("sqlite:///") and not cfg_db_url.startswith("sqlite:////"):
     rel = cfg_db_url.replace("sqlite:///", "", 1)
-
-    app.config["DB_URL"] = f"sqlite:///{os.path.join(BASE_DIR, rel)}"
+    app.config["DB_URL"] = f"sqlite:///{os.path.join(DATA_ROOT, rel)}"
 
 app.config.from_mapping({
     "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620"),
@@ -166,39 +201,6 @@ def anthropic_headers():
         "Content-Type": "application/json"
     }
 
-# # Insert last query to prompt
-# def _inject_last_assistant_turn(built_msgs, profile: dict):
-#     if not built_msgs or built_msgs[0].get("role") != "user":
-#         return built_msgs
-
-#     rs = profile.get("recent_summary")
-#     if not rs:
-#         return built_msgs
-
-#     try:
-#         js = json.loads(rs)
-#     except Exception:
-#         return built_msgs
-
-#     anchor_assistant = (js.get("open_question") or js.get("last_assistant") or "").strip()
-#     anchor_user = (js.get("last_user") or "").strip()
-
-#     if not anchor_assistant and not anchor_user:
-#         return built_msgs
-
-#     injected = [{
-#         "role": "assistant",
-#         "content": [{"type": "text", "text": anchor_assistant[:400]}]
-#     }]
-
-#     curr_user = _last_user_text_from_messages(built_msgs).strip()
-#     if anchor_user and anchor_user != curr_user:
-#         injected.append({
-#             "role": "user",
-#             "content": [{"type": "text", "text": anchor_user[:400]}]
-#         })
-
-#     return injected + built_msgs
 
 # Create JSON object of 3 details
 def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
@@ -257,6 +259,7 @@ def query():
     device_id = (data.get("device_id") or "dev").strip()
     messages = data.get("messages")
     question = data.get("question")
+    language = (data.get("language") or "HE")
 
     built = _normalize_messages(messages, question)
     if not built:
@@ -267,12 +270,17 @@ def query():
 
     profile_ctx = format_profile_for_system(profile)
 
+    if language == "AR":
+        Specific_prompt = PROMPT_AR
+    elif language == "EN":
+        Specific_prompt = PROMPT_EN
+    else:
+        Specific_prompt = PROMPT_HE
+
     to_system = [
-        {"type": "text", "text": PROMPT, "cache_control": {"type": "ephemeral"}}, 
+        {"type": "text", "text": Specific_prompt, "cache_control": {"type": "ephemeral"}}, 
         {"type": "text", "text": profile_ctx},
     ]
-
-    # built = _inject_last_assistant_turn(built, profile)
 
     lt_json = _build_last_turn_json(profile, built)
     if lt_json:
@@ -325,10 +333,6 @@ def query():
 
     assistant_text = _extract_text_blocks(resp_json.get("content"))
 
-    # bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
-    
-    # bg.submit(summarize_recent, device_id)
-
     fut = bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
     
     fut.add_done_callback(lambda _:
@@ -338,7 +342,11 @@ def query():
     if user_text:
         bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
-    return jsonify(resp_json)
+    Response = resp_json["content"][0]["text"]
+
+    Clean_response = Response.replace("\n", " ")
+
+    return jsonify({"response": Clean_response})
 
 
 # Debug last message
@@ -521,76 +529,6 @@ def prune_conversation(device_id: str):
     finally:
         db.close()
 
-# Summary last messages in background
-# def summarize_recent(device_id: str):
-#     """רץ ברקע – מייצר תקציר קצר של ההודעות האחרונות (עד 10 הודעות או 6 שעות)
-#     ושומר בפרופיל תחת recent_summary. לא חוסם את מסלול התשובה.
-#     """
-#     cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
-
-#     db = SessionLocal()
-#     try:
-#         rows = (
-#             db.query(ConvoChunk)
-#               .filter(ConvoChunk.device_id == device_id, ConvoChunk.ts >= cutoff)
-#               .order_by(ConvoChunk.id.asc())
-#               .all()
-#         )
-#         if not rows:
-#             rows = (
-#                 db.query(ConvoChunk)
-#                   .filter(ConvoChunk.device_id == device_id)
-#                   .order_by(ConvoChunk.id.desc())
-#                   .limit(10)
-#                   .all()
-#             )[::-1] 
-#     finally:
-#         db.close()
-
-#     if not rows:
-#         return
-
-#     lines = []
-#     for r in rows[-10:]:
-#         role = "ילד" if r.role == "user" else "פֶּנְדִּי"
-#         snippet = (r.text or "").strip()
-#         if len(snippet) > 240:
-#             snippet = snippet[:240] + "…"
-#         lines.append(f"{role}: {snippet}")
-#     convo_text = "\n".join(lines)
-
-#     payload = {
-#         "model": app.config["ANTHROPIC_MODEL"],
-#         "system": [{
-#             "type": "text",
-#             "text": (
-#             "החזר JSON חוקי בלבד (בלי טקסט נוסף) המסכם את הדיאלוג האחרון לשימוש כקונטקסט.\n"
-#             "פורמט:\n"
-#             "{\n"
-#             '  "topic": string, // חובה לא-ריק; אם לא ברור כתוב "שיחת פתיחה\n'
-#             '  "last_user": string|null,\n'
-#             '  "last_assistant": string|null,\n'
-#             '  "open_question": string|null,  // אם העוזר שאל משהו שממתין לתשובה – רשום את השאלה המדויקת\n'
-#             '  "facts": [string],             // 2–4 עובדות קצרות ורלוונטיות\n'
-#             '  "preferences": [string],       // העדפות/אהבות שהוזכרו עכשיו\n'
-#             "}\n"
-#             "חובה: אם העוזר סיים בשאלה – מלא open_question במדויק. אחרת null."
-#             )
-#         }],
-#         "messages": [{"role": "user", "content": [{"type": "text", "text": convo_text}]}],
-#         "max_tokens": 120,
-#         "temperature": 0.0,
-#         "stream": False
-#     }
-#     try:
-#         r = http.post(CLAUDE_API_URL, headers=anthropic_headers(), json=payload, timeout=(4, 15))
-#         if r.status_code // 100 != 2:
-#             return
-#         summary = _extract_text_blocks(r.json().get("content"))
-#         if summary:
-#             save_profile(device_id, {"recent_summary": summary})
-#     except Exception:
-#         pass
 
 # Create user profile by device id
 @app.post("/profile")
