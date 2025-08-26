@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from models import Base, ConvoChunk
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_
+from urllib3.util import Retry
 
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -75,10 +76,18 @@ PROMPT_AR = (
 
 http = requests.Session()
 
+retry = Retry(
+    total=3,                     # עד 3 ניסיונות
+    connect=3, read=3, status=3,
+    backoff_factor=0.3,           # 0s, 0.3s, 0.6s...
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=frozenset(["GET", "POST"])
+)
+
 adapter = HTTPAdapter(
     pool_connections=20,
     pool_maxsize=50,
-    max_retries=0 
+    max_retries=retry
 )
 
 http.mount("https://", adapter)
@@ -310,21 +319,12 @@ def query():
     }
 
     t0 = time.perf_counter()
-    r = None
-    error = None
-    for attempt in range(3):
-        try:
-            r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(10, 60))
-            print(f"[anthropic-status] {r.status_code} (attempt {attempt+1})")
-            if r.status_code // 100 == 2:  
-                break
-        except requests.RequestException as e:
-            error = e
-            print(f"[anthropic-error] {e} (attempt {attempt+1})")
-            if attempt < 2:
-                time.sleep(1)  
-    if r is None or r.status_code // 100 != 2:
-        return jsonify({"error": "LLM upstream error", "detail": str(error)}), 502 
+    try:
+        r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(10, 60))
+        print(f"[anthropic-status] {r.status_code}")
+    except requests.RequestException as e:
+        print(f"[anthropic-error] {e}")
+        return jsonify({"error": "LLM upstream error", "detail": str(e)}), 502
 
     t1 = time.perf_counter()
     llm_ms = int((t1 - t0) * 1000)
@@ -336,6 +336,7 @@ def query():
         except ValueError:
             body = {"raw": r.text[:500]}
         return jsonify({"error": "LLM non-2xx", "status": r.status_code, "body": body}), 502
+
 
     resp_json = r.json()
 
