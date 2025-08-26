@@ -310,11 +310,21 @@ def query():
     }
 
     t0 = time.perf_counter()
-    try:
-        r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(4, 25))
-        print(f"[anthropic-status] {r.status_code}")
-    except requests.RequestException as e:
-        return jsonify({"error": "LLM upstream error", "detail": str(e)}), 502
+    r = None
+    error = None
+    for attempt in range(3):
+        try:
+            r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(10, 60))
+            print(f"[anthropic-status] {r.status_code} (attempt {attempt+1})")
+            if r.status_code // 100 == 2:  
+                break
+        except requests.RequestException as e:
+            error = e
+            print(f"[anthropic-error] {e} (attempt {attempt+1})")
+            if attempt < 2:
+                time.sleep(1)  
+    if r is None or r.status_code // 100 != 2:
+        return jsonify({"error": "LLM upstream error", "detail": str(error)}), 502 
 
     t1 = time.perf_counter()
     llm_ms = int((t1 - t0) * 1000)
