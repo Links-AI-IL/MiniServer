@@ -74,12 +74,10 @@ PROMPT_AR = (
     "تَعَرَّفْ وَأَكِّدْ المَشاعِر؛ وَاقتَرِحِ اِستِراحات عِندَ الحاجَة."
 )
 
-http = requests.Session()
-
 retry = Retry(
-    total=3,                     # עד 3 ניסיונות
-    connect=3, read=3, status=3,
-    backoff_factor=0.3,           # 0s, 0.3s, 0.6s...
+    total=2,
+    connect=2, read=2, status=2,
+    backoff_factor=0.2,
     status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=frozenset(["GET", "POST"])
 )
@@ -89,6 +87,8 @@ adapter = HTTPAdapter(
     pool_maxsize=50,
     max_retries=retry
 )
+
+http = requests.Session()
 
 http.mount("https://", adapter)
 http.mount("http://", adapter)
@@ -319,8 +319,13 @@ def query():
     }
 
     t0 = time.perf_counter()
+    
     try:
-        r = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(10, 60))
+        r = http.post(
+            CLAUDE_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=(10, 45))
         print(f"[anthropic-status] {r.status_code}")
     except requests.RequestException as e:
         print(f"[anthropic-error] {e}")
@@ -341,14 +346,10 @@ def query():
     resp_json = r.json()
 
     user_text = _last_user_text_from_messages(built)
-
     assistant_text = _extract_text_blocks(resp_json.get("content"))
 
     fut = bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
-    
-    fut.add_done_callback(lambda _:
-        bg.submit(prune_conversation, device_id)
-    )
+    fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
 
     if user_text:
         bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
