@@ -131,6 +131,24 @@ Base.metadata.create_all(engine)
 
 print("Panda server is running")
 
+@app.route("/api/latest-version", methods=["GET"])
+def latest_version():
+    metadata_path = os.path.join("static", "apks", "output-metadata.json")
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    
+    element = metadata["elements"][0]  
+    version_code = element["versionCode"]
+    version_name = element["versionName"]
+    apk_file = element["outputFile"]
+
+    return jsonify({
+        "versionCode": version_code,
+        "versionName": version_name,
+        "apkUrl": f"https://miniserverpanda.onrender.com/static/apks/{apk_file}",
+        "releaseNotes": "✨ גרסה חדשה זמינה"
+    })
+
 # Healthz test to api
 @app.get("/healthz")
 def healthz():
