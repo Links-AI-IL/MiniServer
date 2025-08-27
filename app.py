@@ -74,18 +74,18 @@ PROMPT_AR = (
     "تَعَرَّفْ وَأَكِّدْ المَشاعِر؛ وَاقتَرِحِ اِستِراحات عِندَ الحاجَة."
 )
 
-retry = Retry(
-    total=2,
-    connect=2, read=2, status=2,
-    backoff_factor=0.2,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=frozenset(["GET", "POST"])
-)
+# retry = Retry(
+#     total=2,
+#     connect=2, read=2, status=2,
+#     backoff_factor=0.2,
+#     status_forcelist=[429, 500, 502, 503, 504],
+#     allowed_methods=frozenset(["GET", "POST"])
+# )
 
 adapter = HTTPAdapter(
     pool_connections=20,
     pool_maxsize=50,
-    max_retries=retry
+    max_retries=0
 )
 
 http = requests.Session()
@@ -325,7 +325,7 @@ def query():
             CLAUDE_API_URL,
             headers=headers,
             json=payload,
-            timeout=(10, 45))
+            timeout=(4, 25))
         print(f"[anthropic-status] {r.status_code}")
     except requests.RequestException as e:
         print(f"[anthropic-error] {e}")
