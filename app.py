@@ -39,7 +39,7 @@ PROMPT_HE = (
     "משפטים קצרים: 4–6 מילים בכל משפט.\n"
     "בלי אימוג׳ים ובלי סימנים מיותרים.\n"
     "קרא לילד בשמו אם ידוע.\n"
-    # "ענה בתשובות מפורטות ומורחבות, לפחות 3–5 משפטים בכל תשובה.\n"
+    "ענה בתשובות קצרות יחסית כדי לשמור על שיחה רציפה.\n"
     "ענה בסגנון חם, סבלני ואוהב; עודד בעדינות והימנע מביקורת.\n"
     "הצע משחקי דמיון, סיפורים ושירים פשוטים.\n"
     "אל תחזור על אותו שיר או סיפור; שמור על מקוריות.\n"
@@ -320,16 +320,31 @@ def query():
 
     t0 = time.perf_counter()
     
-    try:
-        r = http.post(
-            CLAUDE_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=(4, 25))
-        print(f"[anthropic-status] {r.status_code}")
-    except requests.RequestException as e:
-        print(f"[anthropic-error] {e}")
-        return jsonify({"error": "LLM upstream error", "detail": str(e)}), 502
+    for attempt in range(2):  # ניסיון ראשון + ניסיון חוזר אחד
+        try:
+            r = http.post(
+                CLAUDE_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=(4, 25)
+            )
+            print(f"[anthropic-status] {r.status_code} (attempt {attempt+1})")
+
+            # אם קיבלנו תשובה תקינה (2xx) – לצאת מיד
+            if r.status_code // 100 == 2:
+                break
+
+        except requests.RequestException as e:
+            error = e
+            print(f"[anthropic-error] {e} (attempt {attempt+1})")
+
+            # רק אם זו לא הפעם האחרונה – לנסות שוב מיידית
+            if attempt < 1:
+                continue  
+
+    # אם גם אחרי ניסיונות אין תשובה טובה
+    if r is None or r.status_code // 100 != 2:
+        return jsonify({"error": "LLM upstream error", "detail": str(error)}), 502
 
     t1 = time.perf_counter()
     llm_ms = int((t1 - t0) * 1000)
