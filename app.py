@@ -315,6 +315,7 @@ def query():
         "system": to_system,
         "messages": built,
         "max_tokens": int(app.config["MAX_TOKENS"]),
+        "temperature": 0.0,
         "stream": False
     }
 
