@@ -287,7 +287,7 @@ def query():
         Specific_prompt = PROMPT_HE
 
     to_system = [
-        {"type": "text", "text": Specific_prompt, "cache_control": {"type": "persistent"}}, 
+        {"type": "text", "text": Specific_prompt}, 
         {"type": "text", "text": profile_ctx},
     ]
 
