@@ -143,9 +143,9 @@ def latest_version():
     apk_file = element["outputFile"]
 
     return jsonify({
-        "versionCode": version_code,
+        "versionCode": version_code, 
         "versionName": version_name,
-        "apkUrl": f"https://miniserverpanda.onrender.com/static/apks/{apk_file}",
+        "apkUrl": f"https://github.com/Links-AI-IL/MiniServer/releases/download/{version_name}/{apk_file}",
         "releaseNotes": "✨ גרסה חדשה זמינה"
     })
 
