@@ -26,6 +26,8 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "/var/data")
 PROFILES_DIR = os.path.join(DATA_ROOT, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
 
+API_KEY = "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"
+
 _ALLOWED_PROFILE_KEYS = {
     "name", "age", "gender",
     "likes", "dislikes", "parent_name", "pronouns",
@@ -219,7 +221,7 @@ def _persist_interaction_async(device_id: str, user_text: str, assistant_text: s
 # General headers
 def anthropic_headers():
     return {
-        "x-api-key": app.config["ANTHROPIC_API_KEY"],
+        "x-api-key": API_KEY,
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "prompt-caching-2024-07-31",
         "Content-Type": "application/json"
@@ -275,8 +277,8 @@ def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
 # Send query to api
 @app.post("/query")
 def query():
-    if not app.config.get("ANTHROPIC_API_KEY"):
-        return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 500
+    if not API_KEY:
+        return jsonify({"error": "API_KEY not configured"}), 500
 
     data = request.get_json(force=True) or {}
 
@@ -427,7 +429,7 @@ def debug_config():
     return jsonify({
         "root_config_exists": os.path.exists(os.path.join(app.root_path, "config.py")),
         "instance_config_exists": os.path.exists(os.path.join(app.instance_path, "config.py")),
-        "has_api_key": bool(app.config.get("ANTHROPIC_API_KEY")),
+        "has_api_key": bool(API_KEY),
         "instance_path": app.instance_path,
         "root_path": app.root_path,
         "model": app.config.get("ANTHROPIC_MODEL"),
