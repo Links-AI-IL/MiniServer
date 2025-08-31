@@ -26,7 +26,7 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "/var/data")
 PROFILES_DIR = os.path.join(DATA_ROOT, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
 
-API_KEY = "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"
+API_KEY = os.environ.get("CLAUDE_API_KEY")
 
 _ALLOWED_PROFILE_KEYS = {
     "name", "age", "gender",
@@ -154,8 +154,8 @@ def latest_version():
 # Healthz test to api
 @app.get("/healthz")
 def healthz():
-    if not app.config.get("ANTHROPIC_API_KEY"):
-        return jsonify(status="error", error="ANTHROPIC_API_KEY missing"), 500
+    if not API_KEY:
+        return jsonify(status="error", error="API_KEY missing"), 500
     return jsonify("Panda server is working!")
 
 # Return miss profile details
