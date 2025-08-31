@@ -285,6 +285,9 @@ def query():
     question = data.get("question")
     language = (data.get("language") or "HE")
 
+    if not messages and question:
+        messages = [{"role": "user", "content": question}]
+
     built = _normalize_messages(messages, question)
     if not built:
         return jsonify({"error": "missing messages or question"}), 400
