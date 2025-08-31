@@ -26,7 +26,7 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "/var/data")
 PROFILES_DIR = os.path.join(DATA_ROOT, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
 
-API_KEY = "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"
+API_KEY = "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"
 
 _ALLOWED_PROFILE_KEYS = {
     "name", "age", "gender",
@@ -362,7 +362,10 @@ def query():
                 continue  
 
     if r is None or r.status_code // 100 != 2:
-        return jsonify({"error": "LLM upstream error", "detail": str(error)}), 502
+        return jsonify({
+        "error": "LLM upstream error",
+        "detail": str(error) if error else f"HTTP {r.status_code if r else 'no response'}"
+    }), 502
 
     t1 = time.perf_counter()
     llm_ms = int((t1 - t0) * 1000)
