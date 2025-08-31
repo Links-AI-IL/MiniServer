@@ -337,6 +337,9 @@ def query():
     }
 
     t0 = time.perf_counter()
+
+    r = None
+    error = None
     
     for attempt in range(2):
         try:
