@@ -333,7 +333,7 @@ def query():
         "messages": built,
         "max_tokens": int(app.config["MAX_TOKENS"]),
         "temperature": 0.0,
-        "stream": False
+        "stream": True
     }
 
     t0 = time.perf_counter()
@@ -343,12 +343,21 @@ def query():
     
     for attempt in range(2):
         try:
-            r = http.post(
+            with requests.post(
                 CLAUDE_API_URL,
                 headers=headers,
                 json=payload,
-                timeout=(4, 25)
-            )
+                stream=True,  
+                timeout=(4, 60)
+            ) as r:
+                for line in r.iter_lines(decode_unicode=True):
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[len("data:"):].strip()
+                    if chunk == "[DONE]":
+                        break
+                    yield f"data: {chunk}\n\n"   
+
             print(f"[anthropic-status] {r.status_code} (attempt {attempt+1})")
 
             if r.status_code // 100 == 2:
@@ -396,6 +405,39 @@ def query():
 
     return jsonify({"response": Clean_response})
 
+@app.post("/query-stream")
+def query_stream():
+    if not app.config.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 500
+
+    data = request.get_json(force=True) or {}
+    question = data.get("question", "")
+    messages = _normalize_messages(data.get("messages"), question)
+
+    if not messages:
+        return jsonify({"error": "missing messages or question"}), 400
+
+    headers = anthropic_headers()
+    payload = {
+        "model": app.config["ANTHROPIC_MODEL"],
+        "system": [{"type": "text", "text": PROMPT_HE}],
+        "messages": messages,
+        "max_tokens": int(app.config["MAX_TOKENS"]),
+        "temperature": 0.0,
+        "stream": True 
+    }
+
+    def generate():
+        with requests.post(CLAUDE_API_URL, headers=headers, json=payload, stream=True) as r:
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                chunk = line[len("data:"):].strip()
+                if chunk == "[DONE]":
+                    break
+                yield f"data: {chunk}\n\n"
+
+    return app.response_class(generate(), mimetype="text/event-stream")
 
 # Debug last message
 @app.get("/debug/chunks")

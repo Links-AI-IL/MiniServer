@@ -1,5 +1,7 @@
-ANTHROPIC_API_KEY = "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"
+import os
+ANTHROPIC_API_KEY = os.environ.get("CLAUDE_API_KEY")
 ANTHROPIC_MODEL = "claude-3-5-sonnet-20240620"
 MAX_TOKENS = 400
 PORT = 5001
 DB_URL = "sqlite:///rag.db"
+
