@@ -26,6 +26,8 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "/var/data")
 PROFILES_DIR = os.path.join(DATA_ROOT, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
 
+API_KEY = os.environ.get("CLAUDE_API_KEY")
+
 _ALLOWED_PROFILE_KEYS = {
     "name", "age", "gender",
     "likes", "dislikes", "parent_name", "pronouns",
@@ -152,8 +154,8 @@ def latest_version():
 # Healthz test to api
 @app.get("/healthz")
 def healthz():
-    if not app.config.get("ANTHROPIC_API_KEY"):
-        return jsonify(status="error", error="ANTHROPIC_API_KEY missing"), 500
+    if not API_KEY:
+        return jsonify(status="error", error="API_KEY missing"), 500
     return jsonify("Panda server is working!")
 
 # Return miss profile details
@@ -219,7 +221,7 @@ def _persist_interaction_async(device_id: str, user_text: str, assistant_text: s
 # General headers
 def anthropic_headers():
     return {
-        "x-api-key": app.config["ANTHROPIC_API_KEY"],
+        "x-api-key": API_KEY,
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "prompt-caching-2024-07-31",
         "Content-Type": "application/json"
@@ -275,8 +277,8 @@ def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
 # Send query to api
 @app.post("/query")
 def query():
-    if not app.config.get("ANTHROPIC_API_KEY"):
-        return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 500
+    if not API_KEY:
+        return jsonify({"error": "API_KEY not configured"}), 500
 
     data = request.get_json(force=True) or {}
 
@@ -284,9 +286,6 @@ def query():
     messages = data.get("messages")
     question = data.get("question")
     language = (data.get("language") or "HE")
-
-    if not messages and question:
-        messages = [{"role": "user", "content": question}]
 
     built = _normalize_messages(messages, question)
     if not built:
@@ -338,6 +337,9 @@ def query():
     }
 
     t0 = time.perf_counter()
+
+    r = None
+    error = None
     
     for attempt in range(2):
         try:
@@ -369,7 +371,10 @@ def query():
                 continue  
 
     if r is None or r.status_code // 100 != 2:
-        return jsonify({"error": "LLM upstream error", "detail": str(error)}), 502
+        return jsonify({
+        "error": "LLM upstream error",
+        "detail": str(error) if error else f"HTTP {r.status_code if r else 'no response'}"
+    }), 502
 
     t1 = time.perf_counter()
     llm_ms = int((t1 - t0) * 1000)
@@ -472,7 +477,7 @@ def debug_config():
     return jsonify({
         "root_config_exists": os.path.exists(os.path.join(app.root_path, "config.py")),
         "instance_config_exists": os.path.exists(os.path.join(app.instance_path, "config.py")),
-        "has_api_key": bool(app.config.get("ANTHROPIC_API_KEY")),
+        "has_api_key": bool(API_KEY),
         "instance_path": app.instance_path,
         "root_path": app.root_path,
         "model": app.config.get("ANTHROPIC_MODEL"),
