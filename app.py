@@ -493,6 +493,7 @@ def query_stream():
         if user_text:
             bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
+    print(f"response = {app.response_class(generate(), mimetype="text/event-stream")}")
     return app.response_class(generate(), mimetype="text/event-stream")
 
 # Debug last message
