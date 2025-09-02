@@ -473,6 +473,7 @@ def query_stream():
                     continue
                 chunk = line[len("data:"):].strip()
                 if chunk == "[DONE]":
+                    yield "data: [DONE]\n\n"
                     break
                 try:
                     evt = json.loads(chunk)
@@ -484,6 +485,7 @@ def query_stream():
                     pass
 
                 yield f"data: {chunk}\n\n"
+
         final_text = "".join(assistant_full).replace("\n", " ")
         print("API final_text:", final_text)
 
@@ -496,6 +498,7 @@ def query_stream():
             bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
     return app.response_class(generate(), mimetype="text/event-stream")
+
 
 # Debug last message
 @app.get("/debug/chunks")
