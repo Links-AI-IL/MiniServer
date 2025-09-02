@@ -405,29 +405,68 @@ def query():
 
     return jsonify({"response": Clean_response})
 
+
+# Send query with stream
 @app.post("/query-stream")
 def query_stream():
-    if not app.config.get("ANTHROPIC_API_KEY"):
+    if not API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY not configured"}), 500
 
     data = request.get_json(force=True) or {}
-    question = data.get("question", "")
-    messages = _normalize_messages(data.get("messages"), question)
+    device_id = (data.get("device_id") or "dev").strip()
+    messages = data.get("messages")
+    question = data.get("question")
+    language = (data.get("language") or "HE")
 
-    if not messages:
+    built = _normalize_messages(messages, question)
+    if not built:
         return jsonify({"error": "missing messages or question"}), 400
+    
+    profile = load_profile(device_id)
+    profile["device_id"] = device_id
+    profile_ctx = format_profile_for_system(profile)
+
+    if language == "AR":
+        Specific_prompt = PROMPT_AR
+    elif language == "EN":
+        Specific_prompt = PROMPT_EN
+    else:
+        Specific_prompt = PROMPT_HE
+
+    to_system = [
+        {"type": "text", "text": Specific_prompt}, 
+        {"type": "text", "text": profile_ctx},
+    ]
+
+    lt_json = _build_last_turn_json(profile, built)
+    if lt_json:
+        to_system.append({
+            "type": "text",
+            "text": (
+                "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
+            )
+        })
+        
+    print("last-turn-json:", lt_json)
+
+    instr = profile_collect_instruction(profile)
+    if instr:
+        to_system.append({"type": "text", "text": instr})
+
+    print(f"to system = {to_system}")
 
     headers = anthropic_headers()
     payload = {
         "model": app.config["ANTHROPIC_MODEL"],
-        "system": [{"type": "text", "text": PROMPT_HE}],
-        "messages": messages,
+        "system": to_system,
+        "messages": built,
         "max_tokens": int(app.config["MAX_TOKENS"]),
         "temperature": 0.0,
         "stream": True 
     }
 
     def generate():
+        assistant_full = []
         with requests.post(CLAUDE_API_URL, headers=headers, json=payload, stream=True) as r:
             for line in r.iter_lines(decode_unicode=True):
                 if not line or not line.startswith("data:"):
@@ -435,7 +474,24 @@ def query_stream():
                 chunk = line[len("data:"):].strip()
                 if chunk == "[DONE]":
                     break
+                try:
+                    evt = json.loads(chunk)
+                    if evt.get("type") == "content_block_delta":
+                        piece = evt.get("delta", {}).get("text", "")
+                        if piece:
+                            assistant_full.append(piece)
+                except Exception:
+                    pass
+
                 yield f"data: {chunk}\n\n"
+
+        user_text = _last_user_text_from_messages(built)
+        final_text = "".join(assistant_full).replace("\n", " ")
+        if user_text or final_text:
+            fut = bg.submit(_persist_interaction_async, device_id, user_text, final_text)
+            fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
+        if user_text:
+            bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
     return app.response_class(generate(), mimetype="text/event-stream")
 
