@@ -468,15 +468,15 @@ def query_stream():
     def generate():
         assistant_full = []
         with requests.post(CLAUDE_API_URL, headers=headers, json=payload, stream=True) as r:
-            for line in r.iter_lines(decode_unicode=True):
-                if not line or not line.startswith("data:"):
+            for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
+                if not chunk:
                     continue
-                chunk = line[len("data:"):].strip()
-                # if chunk == "[DONE]":
-                #     yield "data: [DONE]\n\n"
-                #     break
+                for line in chunk.splitlines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
                 try:
-                    evt = json.loads(chunk)
+                    evt = json.loads(data)
                     if evt.get("type") == "content_block_delta":
                         piece = evt.get("delta", {}).get("text", "")
                         if piece:
@@ -484,7 +484,7 @@ def query_stream():
                 except Exception:
                     pass
 
-                yield f"data: {chunk}\n\n"
+                yield f"data: {data}\n\n"
                 
         yield "data: [DONE]\n\n"
 
