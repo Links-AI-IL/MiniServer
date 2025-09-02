@@ -484,6 +484,8 @@ def query_stream():
                     pass
 
                 yield f"data: {chunk}\n\n"
+        final_text = "".join(assistant_full).replace("\n", " ")
+        print("API final_text:", final_text)
 
         user_text = _last_user_text_from_messages(built)
         final_text = "".join(assistant_full).replace("\n", " ")
@@ -493,7 +495,6 @@ def query_stream():
         if user_text:
             bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
-    print(f"response = {app.response_class(generate(), mimetype="text/event-stream")}")
     return app.response_class(generate(), mimetype="text/event-stream")
 
 # Debug last message
