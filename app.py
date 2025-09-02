@@ -472,9 +472,9 @@ def query_stream():
                 if not line or not line.startswith("data:"):
                     continue
                 chunk = line[len("data:"):].strip()
-                if chunk == "[DONE]":
-                    yield "data: [DONE]\n\n"
-                    break
+                # if chunk == "[DONE]":
+                #     yield "data: [DONE]\n\n"
+                #     break
                 try:
                     evt = json.loads(chunk)
                     if evt.get("type") == "content_block_delta":
@@ -485,6 +485,8 @@ def query_stream():
                     pass
 
                 yield f"data: {chunk}\n\n"
+                
+        yield "data: [DONE]\n\n"
 
         final_text = "".join(assistant_full).replace("\n", " ")
         print("API final_text:", final_text)
