@@ -481,7 +481,9 @@ def query_stream():
                         piece = evt.get("delta", {}).get("text", "")
                         if piece:
                             assistant_full.append(piece)
-                except Exception:
+                except Exception as e:
+                    print("❌ JSON parse error:", e)
+                    print("   Raw line:", line)
                     pass
 
                 yield f"data: {data}\n\n"
