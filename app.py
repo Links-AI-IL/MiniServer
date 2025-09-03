@@ -475,12 +475,16 @@ def query_stream():
                     if not line.startswith("data:"):
                         continue
                     data = line[len("data:"):].strip()
+                    print(">>> RAW line:", repr(line))
+
                 try:
                     evt = json.loads(data)
                     if evt.get("type") == "content_block_delta":
                         piece = evt.get("delta", {}).get("text", "")
                         if piece:
                             assistant_full.append(piece)
+                            print(">>> DELTA piece:", repr(piece))
+
                 except Exception as e:
                     print("❌ JSON parse error:", e)
                     print("   Raw line:", line)
@@ -491,6 +495,7 @@ def query_stream():
         yield "data: [DONE]\n\n"
 
         final_text = "".join(assistant_full).replace("\n", " ")
+        
         print("API final_text:", final_text)
 
         user_text = _last_user_text_from_messages(built)
