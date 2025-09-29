@@ -114,7 +114,7 @@ elif cfg_db_url.startswith("sqlite:///") and not cfg_db_url.startswith("sqlite:/
     app.config["DB_URL"] = f"sqlite:///{os.path.join(DATA_ROOT, rel)}"
 
 app.config.from_mapping({
-    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20240620"),
+    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
     "MAX_TOKENS": int(app.config.get("MAX_TOKENS", 500)),
     "PORT": int(app.config.get("PORT", 5001)),
     "DB_URL": app.config["DB_URL"]
@@ -404,7 +404,7 @@ def query():
     Clean_response = Response.replace("\n", " ")
 
     return jsonify({"response": Clean_response})
-
+    
 
 # Send query with stream
 @app.post("/query-stream")
