@@ -116,7 +116,7 @@ elif cfg_db_url.startswith("sqlite:///") and not cfg_db_url.startswith("sqlite:/
     app.config["DB_URL"] = f"sqlite:///{os.path.join(DATA_ROOT, rel)}"
 
 app.config.from_mapping({
-    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-opus-4-20250514"),
     "MAX_TOKENS": int(app.config.get("MAX_TOKENS", 500)),
     "PORT": int(app.config.get("PORT", 5001)),
     "DB_URL": app.config["DB_URL"]
