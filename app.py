@@ -245,6 +245,16 @@ def anthropic_headers():
 # Create JSON object of 3 details
 def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
 
+    if str(profile.get("device_id", "")).lower() == "mylo":
+        current_user = (_last_user_text_from_messages(built_msgs) or "").strip()[:400]
+        if not current_user:
+            return None
+        return json.dumps({
+            "last_user": None,
+            "last_assistant": None,
+            "current_user": current_user
+        }, ensure_ascii=False)
+
     current_user = (_last_user_text_from_messages(built_msgs) or "").strip()[:400]
 
     last_user = ""
@@ -340,9 +350,11 @@ def query():
         
     print("last-turn-json:", lt_json)
 
-    instr = profile_collect_instruction(profile)
-    if instr:
-        to_system.append({"type": "text", "text": instr})
+    instr = None
+    if not skip_profile_ops:
+        instr = profile_collect_instruction(profile)
+        if instr:
+            to_system.append({"type": "text", "text": instr})
 
     headers = anthropic_headers()
 
@@ -472,15 +484,17 @@ def query_stream():
         to_system.append({
             "type": "text",
             "text": (
-                "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
+                "רצף אחרון (אל תקרא/תצטט למשתמש):\n" + lt_json
             )
         })
         
     print("last-turn-json:", lt_json)
 
-    instr = profile_collect_instruction(profile)
-    if instr:
-        to_system.append({"type": "text", "text": instr})
+    instr = None
+    if not skip_profile_ops:
+        instr = profile_collect_instruction(profile)
+        if instr:
+            to_system.append({"type": "text", "text": instr})
 
     print(f"to system = {to_system}")
 
