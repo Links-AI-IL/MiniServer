@@ -75,6 +75,18 @@ PROMPT_AR = (
     "تَعَرَّفْ وَأَكِّدْ المَشاعِر؛ وَاقتَرِحِ اِستِراحات عِندَ الحاجَة."
 )
 
+PROMPT_MYLO = (
+    "אתה דמות חכמה, רגועה וחמה מתוך אפליקציית MYLO - אפליקציה לאנשים מבוגרים לשיפור הזיכרון והפעילות המוחית.\n"
+    "פנה למשתמש בשמו במידה ויש לך את שמו בהודעה. דבר תמיד בעברית תקנית עם ניקוד, ברורה ונעימה. שמור על שפה פשוטה וידידותית, בלי סלנג ובלי קיצורים.\n"
+    "דבר בגובה העיניים, בכבוד ובסבלנות  אל תשתמש בטון מתנשא או מהיר מדי.\n"
+    "ענה תשובות קצרות וברורות, אך אנושיות ורגישות.\n"
+    "אם המשתמש שואל על האפליקציה או על האימונים — הסבר לו בעדינות כיצד להשתמש במשחקים, איך מתקדמים, ומה המטרה שלהם.\n"
+    "אם המשתמש סתם רוצה לשוחח — היה נעים, משתף, מעודד, והצע שיחה חיובית ומכבדת.\n"
+    "הימנע מדיונים פוליטיים או נושאים רגישים.\n"
+    "הדגש את החשיבות של אימון מוחי יומיומי, שמירה על מצב רוח טוב, וסקרנות מחשבתית.\n"
+    "הצג את עצמך כעוזר אישי מתוך MYLO, שנמצא כאן כדי לעזור, לעודד, ולהקשיב."
+)
+
 # retry = Retry(
 #     total=2,
 #     connect=2, read=2, status=2,
@@ -296,13 +308,21 @@ def query():
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
-    profile_ctx = format_profile_for_system(profile)
-
-    if language == "AR":
+    if device_id.lower() == "mylo":
+        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MYLO."
+        skip_profile_ops = True
+        Specific_prompt = PROMPT_MYLO
+    elif language == "AR":
+        profile_ctx = format_profile_for_system(profile)
+        skip_profile_ops = False
         Specific_prompt = PROMPT_AR
     elif language == "EN":
+        profile_ctx = format_profile_for_system(profile)
+        skip_profile_ops = False
         Specific_prompt = PROMPT_EN
     else:
+        profile_ctx = format_profile_for_system(profile)
+        skip_profile_ops = False
         Specific_prompt = PROMPT_HE
 
     to_system = [
@@ -395,9 +415,9 @@ def query():
     user_text = _last_user_text_from_messages(built)
     assistant_text = _extract_text_blocks(resp_json.get("content"))
 
-    fut = bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
-    fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
-
+    if not skip_profile_ops:
+        fut = bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
+        fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
     if user_text:
         bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
@@ -426,13 +446,22 @@ def query_stream():
     
     profile = load_profile(device_id)
     profile["device_id"] = device_id
-    profile_ctx = format_profile_for_system(profile)
 
-    if language == "AR":
+    if device_id.lower() == "MYLO":
+        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MYLO."
+        skip_profile_ops = True
+        Specific_prompt = PROMPT_MYLO
+    elif language == "AR":
+        profile_ctx = format_profile_for_system(profile)
+        skip_profile_ops = False
         Specific_prompt = PROMPT_AR
     elif language == "EN":
+        profile_ctx = format_profile_for_system(profile)
+        skip_profile_ops = False
         Specific_prompt = PROMPT_EN
     else:
+        profile_ctx = format_profile_for_system(profile)
+        skip_profile_ops = False
         Specific_prompt = PROMPT_HE
 
     to_system = [
@@ -500,11 +529,12 @@ def query_stream():
 
         user_text = _last_user_text_from_messages(built)
         final_text = "".join(assistant_full).replace("\n", " ")
-        if user_text or final_text:
-            fut = bg.submit(_persist_interaction_async, device_id, user_text, final_text)
-            fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
-        if user_text:
-            bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
+        if not skip_profile_ops:
+            if user_text or final_text:
+                fut = bg.submit(_persist_interaction_async, device_id, user_text, final_text)
+                fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
+            if user_text:
+                bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
     return app.response_class(generate(), mimetype="text/event-stream")
 
