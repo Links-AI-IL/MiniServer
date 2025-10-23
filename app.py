@@ -339,14 +339,22 @@ def query():
         {"type": "text", "text": profile_ctx},
     ]
 
-    lt_json = _build_last_turn_json(profile, built)
-    if lt_json:
+    recent_messages = data.get("recent_messages")
+    if device_id.lower() == "mylo" and isinstance(recent_messages, list) and recent_messages:
+        context_snippet = "\n".join(recent_messages[-3:])
         to_system.append({
             "type": "text",
-            "text": (
-                "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
-            )
+            "text": f"שיחה קודמת (אל תקרא/תצטט למשתמש):\n{context_snippet}"
         })
+    else:
+        lt_json = _build_last_turn_json(profile, built)
+        if lt_json:
+            to_system.append({
+                "type": "text",
+                "text": (
+                    "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
+                )
+            })
         
     print("last-turn-json:", lt_json)
 
@@ -479,14 +487,22 @@ def query_stream():
         {"type": "text", "text": profile_ctx},
     ]
 
-    lt_json = _build_last_turn_json(profile, built)
-    if lt_json:
+    recent_messages = data.get("recent_messages")
+    if device_id.lower() == "mylo" and isinstance(recent_messages, list) and recent_messages:
+        context_snippet = "\n".join(recent_messages[-3:])
         to_system.append({
             "type": "text",
-            "text": (
-                "רצף אחרון (אל תקרא/תצטט למשתמש):\n" + lt_json
-            )
+            "text": f"שיחה קודמת (אל תקרא/תצטט למשתמש):\n{context_snippet}"
         })
+    else:
+        lt_json = _build_last_turn_json(profile, built)
+        if lt_json:
+            to_system.append({
+                "type": "text",
+                "text": (
+                    "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
+                )
+            })
         
     print("last-turn-json:", lt_json)
 
