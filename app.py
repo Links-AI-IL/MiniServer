@@ -308,22 +308,21 @@ def query():
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
-    if device_id.lower() == "mylo":
-        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MYLO."
-        skip_profile_ops = True
+    if device_id == "mylo":
         Specific_prompt = PROMPT_MYLO
     elif language == "AR":
-        profile_ctx = format_profile_for_system(profile)
-        skip_profile_ops = False
         Specific_prompt = PROMPT_AR
     elif language == "EN":
-        profile_ctx = format_profile_for_system(profile)
-        skip_profile_ops = False
         Specific_prompt = PROMPT_EN
+    else:
+        Specific_prompt = PROMPT_HE
+
+    if device_id == "mylo":
+        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MYLO."
+        skip_profile_ops = True
     else:
         profile_ctx = format_profile_for_system(profile)
         skip_profile_ops = False
-        Specific_prompt = PROMPT_HE
 
     to_system = [
         {"type": "text", "text": Specific_prompt}, 
@@ -447,22 +446,21 @@ def query_stream():
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
-    if device_id.lower() == "MYLO":
-        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MYLO."
-        skip_profile_ops = True
+    if device_id == "mylo":
         Specific_prompt = PROMPT_MYLO
     elif language == "AR":
-        profile_ctx = format_profile_for_system(profile)
-        skip_profile_ops = False
         Specific_prompt = PROMPT_AR
     elif language == "EN":
-        profile_ctx = format_profile_for_system(profile)
-        skip_profile_ops = False
         Specific_prompt = PROMPT_EN
+    else:
+        Specific_prompt = PROMPT_HE
+
+    if device_id == "mylo":
+        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MYLO."
+        skip_profile_ops = True
     else:
         profile_ctx = format_profile_for_system(profile)
         skip_profile_ops = False
-        Specific_prompt = PROMPT_HE
 
     to_system = [
         {"type": "text", "text": Specific_prompt}, 
