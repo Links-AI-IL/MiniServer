@@ -340,6 +340,7 @@ def query():
     ]
 
     recent_messages = data.get("recent_messages")
+    lt_json = None
     if device_id.lower() == "mylo" and isinstance(recent_messages, list) and recent_messages:
         context_snippet = "\n".join(recent_messages[-3:])
         to_system.append({
@@ -488,6 +489,7 @@ def query_stream():
     ]
 
     recent_messages = data.get("recent_messages")
+    lt_json = None
     if device_id.lower() == "mylo" and isinstance(recent_messages, list) and recent_messages:
         context_snippet = "\n".join(recent_messages[-3:])
         to_system.append({
