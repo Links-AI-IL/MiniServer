@@ -75,6 +75,19 @@ PROMPT_AR = (
     "تَعَرَّفْ وَأَكِّدْ المَشاعِر؛ وَاقتَرِحِ اِستِراحات عِندَ الحاجَة."
 )
 
+PROMPT_RO = (
+    "Ești un urs panda prietenos pe nume Pendi. Vorbește direct, la nivelul ochilor, cu copiii cu vârste între 3 și 6 ani.\n"
+    "Răspunde întotdeauna doar în limba română. Vorbește potrivit genului copilului.\n"
+    "Folosește propoziții scurte și răspunsuri simple și directe. Menține conversația curgătoare și plăcută.\n"
+    "Fără emoji-uri și fără simboluri inutile.\n"
+    "Dacă știi numele copilului, adresează-te pe nume.\n"
+    "Nu începe propozițiile cu 'Pendi:'.\n"
+    "Răspunde într-un stil cald, răbdător și iubitor; încurajează blând și evită critica.\n"
+    "Propune jocuri de imaginație, povești scurte și cântecele simple.\n"
+    "Nu repeta același cântec sau poveste; păstrează răspunsurile originale.\n"
+    "Recunoaște și validează emoțiile copilului; sugerează pauze atunci când este nevoie."
+)
+
 PROMPT_MYLO = (
     "אתה דמות חכמה, רגועה וחמה מתוך אפליקציית MYLO - אפליקציה לאנשים מבוגרים לשיפור הזיכרון והפעילות המוחית.\n"
     "פנה למשתמש בשמו במידה ויש לך את שמו בהודעה. דבר תמיד בעברית תקנית **עם ניקוד מלא בכל משפט ובכל מילה**, ברורה ונעימה. אל תוותר לעולם על ניקוד מלא, גם בתשובות קצרות או רגשיות.\n"
@@ -309,7 +322,7 @@ def query():
     device_id = (data.get("device_id") or "dev").strip()
     messages = data.get("messages")
     question = data.get("question")
-    language = (data.get("language") or "HE")
+    language = (data.get("language") or "HE").upper()  # Romania version
 
     built = _normalize_messages(messages, question)
     if not built:
@@ -324,6 +337,8 @@ def query():
         Specific_prompt = PROMPT_AR
     elif language == "EN":
         Specific_prompt = PROMPT_EN
+    elif language == "RO":  # Romania version
+        Specific_prompt = PROMPT_RO  # Romania version
     else:
         Specific_prompt = PROMPT_HE
 
@@ -458,7 +473,7 @@ def query_stream():
     device_id = (data.get("device_id") or "dev").strip()
     messages = data.get("messages")
     question = data.get("question")
-    language = (data.get("language") or "HE")
+    language = (data.get("language") or "HE").upper()  # Romania version
 
     built = _normalize_messages(messages, question)
     if not built:
@@ -473,6 +488,8 @@ def query_stream():
         Specific_prompt = PROMPT_AR
     elif language == "EN":
         Specific_prompt = PROMPT_EN
+    elif language == "RO":  # Romania version
+        Specific_prompt = PROMPT_RO  # Romania version
     else:
         Specific_prompt = PROMPT_HE
 
