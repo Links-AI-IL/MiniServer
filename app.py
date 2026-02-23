@@ -29,10 +29,17 @@ os.makedirs(PROFILES_DIR, exist_ok=True)
 API_KEY = os.environ.get("CLAUDE_API_KEY")
 
 _ALLOWED_PROFILE_KEYS = {
-    "name", "age", "gender",
-    "likes", "dislikes", "parent_name", "pronouns",
-    "recent_summary"
+    "name",
+    "age",
+    "gender",
+    "likes",
+    "dislikes",
+    "parent_name",
+    "pronouns",
+    "recent_summary",
 }
+
+MAX_HISTORY = 30
 
 PROMPT_HE = (
     "אתה דמות של דובי פַּנְדָּה חברותי בשם פֶּנְדִּי. דבר ישירות בגובה עיניים לילדים בני 3–6.\n"
@@ -63,7 +70,7 @@ PROMPT_EN = (
 )
 
 PROMPT_AR = (
- "أنتَ شَخصِيَّةُ دُبّ باندا وُدِّيٍّ باسم بِنْدي. تَكَلَّمْ مُباشَرَةً بِمُستَوى أعيُنِ الأطفالِ في سِنّ ٣–٦.\n"
+    "أنتَ شَخصِيَّةُ دُبّ باندا وُدِّيٍّ باسم بِنْدي. تَكَلَّمْ مُباشَرَةً بِمُستَوى أعيُنِ الأطفالِ في سِنّ ٣–٦.\n"
     "أَجِبْ دائِمًا بِاللُّغَةِ العَرَبِيَّةِ فَقَط. أَضِفْ تَشْكِيلًا كامِلًا ودَقيقًا لِكُلِّ كَلِمَة، وَفْقًا لِجِنسِ الطِّفل.\n"
     "اِستَخدِمْ جُمَلًا قَصِيرَة وَإِجابَات قَصِيرَة ومُباشَرَة. اِحفَظْ سَيرَ المُحادَثَة بِسَلاسَة.\n"
     "بِدونِ إيموجي وَبِدونِ رُموزٍ زائِدَة.\n"
@@ -100,6 +107,21 @@ PROMPT_MYLO = (
     "הצג את עצמך כעוזר אישי מתוך MILO, שנמצא כאן כדי לעזור, לעודד, ולהקשיב."
 )
 
+SUMMARY_P_HE = """
+    אתה מסכם להורי המשתמש סקירה רגשית כללית על הילד/ה.
+    ענה בהתאם לשפה המבוקשת
+    אל תכתוב אבחנה רפואית.
+    אל תשתמש בשפה דרמטית.
+    אל תצטט משפטים מלאים מהשיחה.
+    הצג תצפיות כלליות בלבד.
+    כלול:
+    - מצב רגשי כללי
+    - נושאים שחזרו
+    - רגישויות אם קיימות
+    - נקודות חיוביות
+    - המלצה עדינה לשיחה
+    """
+
 # retry = Retry(
 #     total=2,
 #     connect=2, read=2, status=2,
@@ -108,11 +130,7 @@ PROMPT_MYLO = (
 #     allowed_methods=frozenset(["GET", "POST"])
 # )
 
-adapter = HTTPAdapter(
-    pool_connections=20,
-    pool_maxsize=50,
-    max_retries=0
-)
+adapter = HTTPAdapter(pool_connections=20, pool_maxsize=50, max_retries=0)
 
 http = requests.Session()
 
@@ -140,19 +158,25 @@ elif cfg_db_url.startswith("sqlite:///") and not cfg_db_url.startswith("sqlite:/
     rel = cfg_db_url.replace("sqlite:///", "", 1)
     app.config["DB_URL"] = f"sqlite:///{os.path.join(DATA_ROOT, rel)}"
 
-app.config.from_mapping({
-    "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-opus-4-20250514"),
-    "MAX_TOKENS": int(app.config.get("MAX_TOKENS", 500)),
-    "PORT": int(app.config.get("PORT", 5001)),
-    "DB_URL": app.config["DB_URL"]
-})
+app.config.from_mapping(
+    {
+        "ANTHROPIC_MODEL": app.config.get("ANTHROPIC_MODEL", "claude-opus-4-20250514"),
+        "MAX_TOKENS": int(app.config.get("MAX_TOKENS", 500)),
+        "PORT": int(app.config.get("PORT", 5001)),
+        "DB_URL": app.config["DB_URL"],
+    }
+)
 
 engine = create_engine(
     app.config["DB_URL"],
     echo=False,
     future=True,
-    connect_args={"check_same_thread": False} if app.config["DB_URL"].startswith("sqlite") else {}
-    )
+    connect_args=(
+        {"check_same_thread": False}
+        if app.config["DB_URL"].startswith("sqlite")
+        else {}
+    ),
+)
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -160,23 +184,27 @@ Base.metadata.create_all(engine)
 
 print("Panda server is running")
 
+
 @app.route("/api/latest-version", methods=["GET"])
 def latest_version():
     metadata_path = os.path.join("static", "apks", "output-metadata.json")
     with open(metadata_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
-    
-    element = metadata["elements"][0]  
+
+    element = metadata["elements"][0]
     version_code = element["versionCode"]
     version_name = element["versionName"]
     apk_file = element["outputFile"]
 
-    return jsonify({
-        "versionCode": version_code, 
-        "versionName": version_name,
-        "apkUrl": f"https://github.com/Links-AI-IL/MiniServer/releases/download/{version_name}/{apk_file}",
-        "releaseNotes": "✨ גרסה חדשה זמינה"
-    })
+    return jsonify(
+        {
+            "versionCode": version_code,
+            "versionName": version_name,
+            "apkUrl": f"https://github.com/Links-AI-IL/MiniServer/releases/download/{version_name}/{apk_file}",
+            "releaseNotes": "✨ גרסה חדשה זמינה",
+        }
+    )
+
 
 # Healthz test to api
 @app.get("/healthz")
@@ -184,6 +212,7 @@ def healthz():
     if not API_KEY:
         return jsonify(status="error", error="API_KEY missing"), 500
     return jsonify("Panda server is working!")
+
 
 # Return miss profile details
 def profile_collect_instruction(profile: dict) -> str | None:
@@ -200,6 +229,7 @@ def profile_collect_instruction(profile: dict) -> str | None:
         "אל תבקש פרטים מזהים נוספים."
     )
 
+
 # Collect message or messages
 def _normalize_messages(messages, question):
     if messages and isinstance(messages, list):
@@ -209,6 +239,7 @@ def _normalize_messages(messages, question):
         return None
     return [{"role": "user", "content": [{"type": "text", "text": q}]}]
 
+
 # Get clean text to context
 def _extract_text_blocks(content_list):
     out = []
@@ -217,12 +248,14 @@ def _extract_text_blocks(content_list):
             out.append(b.get("text", ""))
     return "\n".join([t for t in out if t])
 
-# Get last message from user 
+
+# Get last message from user
 def _last_user_text_from_messages(built_messages):
     for msg in reversed(built_messages):
         if msg.get("role") == "user":
             return _extract_text_blocks(msg.get("content"))
     return ""
+
 
 # Save messages to DB in background
 def _persist_interaction_async(device_id: str, user_text: str, assistant_text: str):
@@ -232,7 +265,9 @@ def _persist_interaction_async(device_id: str, user_text: str, assistant_text: s
         if user_text:
             db.add(ConvoChunk(device_id=device_id, role="user", text=user_text))
         if assistant_text:
-            db.add(ConvoChunk(device_id=device_id, role="assistant", text=assistant_text))
+            db.add(
+                ConvoChunk(device_id=device_id, role="assistant", text=assistant_text)
+            )
         db.commit()
     except Exception:
         try:
@@ -245,13 +280,14 @@ def _persist_interaction_async(device_id: str, user_text: str, assistant_text: s
         except Exception:
             pass
 
+
 # General headers
 def anthropic_headers():
     return {
         "x-api-key": API_KEY,
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "prompt-caching-2024-07-31",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
 
@@ -262,11 +298,10 @@ def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
         current_user = (_last_user_text_from_messages(built_msgs) or "").strip()[:400]
         if not current_user:
             return None
-        return json.dumps({
-            "last_user": None,
-            "last_assistant": None,
-            "current_user": current_user
-        }, ensure_ascii=False)
+        return json.dumps(
+            {"last_user": None, "last_assistant": None, "current_user": current_user},
+            ensure_ascii=False,
+        )
 
     current_user = (_last_user_text_from_messages(built_msgs) or "").strip()[:400]
 
@@ -278,10 +313,10 @@ def _build_last_turn_json(profile: dict, built_msgs) -> str | None:
         try:
             rows = (
                 db.query(ConvoChunk)
-                  .filter(ConvoChunk.device_id == profile["device_id"])
-                  .order_by(ConvoChunk.id.desc())
-                  .limit(8)
-                  .all()
+                .filter(ConvoChunk.device_id == profile["device_id"])
+                .order_by(ConvoChunk.id.desc())
+                .limit(8)
+                .all()
             )
         finally:
             db.close()
@@ -327,7 +362,7 @@ def query():
     built = _normalize_messages(messages, question)
     if not built:
         return jsonify({"error": "missing messages or question"}), 400
-    
+
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
@@ -350,28 +385,31 @@ def query():
         skip_profile_ops = False
 
     to_system = [
-        {"type": "text", "text": Specific_prompt}, 
+        {"type": "text", "text": Specific_prompt},
         {"type": "text", "text": profile_ctx},
     ]
 
     recent_messages = data.get("recent_messages")
     lt_json = None
-    if device_id.lower() == "mylo" and isinstance(recent_messages, list) and recent_messages:
+    if (
+        device_id.lower() == "mylo"
+        and isinstance(recent_messages, list)
+        and recent_messages
+    ):
         context_snippet = "\n".join(recent_messages[-3:])
-        to_system.append({
-            "type": "text",
-            "text": f"שיחה קודמת (אל תקרא/תצטט למשתמש):\n{context_snippet}"
-        })
+        to_system.append(
+            {
+                "type": "text",
+                "text": f"שיחה קודמת (אל תקרא/תצטט למשתמש):\n{context_snippet}",
+            }
+        )
     else:
         lt_json = _build_last_turn_json(profile, built)
         if lt_json:
-            to_system.append({
-                "type": "text",
-                "text": (
-                    "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
-                )
-            })
-        
+            to_system.append(
+                {"type": "text", "text": ("רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json)}
+            )
+
     print("last-turn-json:", lt_json)
 
     instr = None
@@ -390,30 +428,30 @@ def query():
         "messages": built,
         "max_tokens": int(app.config["MAX_TOKENS"]),
         "temperature": 0.0,
-        "stream": True
+        "stream": True,
     }
 
     t0 = time.perf_counter()
 
     r = None
     error = None
-    
+
     for attempt in range(2):
         try:
             with requests.post(
                 CLAUDE_API_URL,
                 headers=headers,
                 json=payload,
-                stream=True,  
-                timeout=(4, 60)
+                stream=True,
+                timeout=(4, 60),
             ) as r:
                 for line in r.iter_lines(decode_unicode=True):
                     if not line or not line.startswith("data:"):
                         continue
-                    chunk = line[len("data:"):].strip()
+                    chunk = line[len("data:") :].strip()
                     if chunk == "[DONE]":
                         break
-                    yield f"data: {chunk}\n\n"   
+                    yield f"data: {chunk}\n\n"
 
             print(f"[anthropic-status] {r.status_code} (attempt {attempt+1})")
 
@@ -425,13 +463,22 @@ def query():
             print(f"[anthropic-error] {e} (attempt {attempt+1})")
 
             if attempt < 1:
-                continue  
+                continue
 
     if r is None or r.status_code // 100 != 2:
-        return jsonify({
-        "error": "LLM upstream error",
-        "detail": str(error) if error else f"HTTP {r.status_code if r else 'no response'}"
-    }), 502
+        return (
+            jsonify(
+                {
+                    "error": "LLM upstream error",
+                    "detail": (
+                        str(error)
+                        if error
+                        else f"HTTP {r.status_code if r else 'no response'}"
+                    ),
+                }
+            ),
+            502,
+        )
 
     t1 = time.perf_counter()
     llm_ms = int((t1 - t0) * 1000)
@@ -442,8 +489,10 @@ def query():
             body = r.json()
         except ValueError:
             body = {"raw": r.text[:500]}
-        return jsonify({"error": "LLM non-2xx", "status": r.status_code, "body": body}), 502
-
+        return (
+            jsonify({"error": "LLM non-2xx", "status": r.status_code, "body": body}),
+            502,
+        )
 
     resp_json = r.json()
 
@@ -451,7 +500,9 @@ def query():
     assistant_text = _extract_text_blocks(resp_json.get("content"))
 
     if not skip_profile_ops:
-        fut = bg.submit(_persist_interaction_async, device_id, user_text, assistant_text)
+        fut = bg.submit(
+            _persist_interaction_async, device_id, user_text, assistant_text
+        )
         fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
     if user_text:
         bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
@@ -461,7 +512,7 @@ def query():
     Clean_response = Response.replace("\n", " ")
 
     return jsonify({"response": Clean_response})
-    
+
 
 # Send query with stream
 @app.post("/query-stream")
@@ -478,7 +529,7 @@ def query_stream():
     built = _normalize_messages(messages, question)
     if not built:
         return jsonify({"error": "missing messages or question"}), 400
-    
+
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
@@ -501,28 +552,31 @@ def query_stream():
         skip_profile_ops = False
 
     to_system = [
-        {"type": "text", "text": Specific_prompt}, 
+        {"type": "text", "text": Specific_prompt},
         {"type": "text", "text": profile_ctx},
     ]
 
     recent_messages = data.get("recent_messages")
     lt_json = None
-    if device_id.lower() == "mylo" and isinstance(recent_messages, list) and recent_messages:
+    if (
+        device_id.lower() == "mylo"
+        and isinstance(recent_messages, list)
+        and recent_messages
+    ):
         context_snippet = "\n".join(recent_messages[-3:])
-        to_system.append({
-            "type": "text",
-            "text": f"שיחה קודמת (אל תקרא/תצטט למשתמש):\n{context_snippet}"
-        })
+        to_system.append(
+            {
+                "type": "text",
+                "text": f"שיחה קודמת (אל תקרא/תצטט למשתמש):\n{context_snippet}",
+            }
+        )
     else:
         lt_json = _build_last_turn_json(profile, built)
         if lt_json:
-            to_system.append({
-                "type": "text",
-                "text": (
-                    "רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json
-                )
-            })
-        
+            to_system.append(
+                {"type": "text", "text": ("רצף אחרון (אל תקרא/תצטט לילד):\n" + lt_json)}
+            )
+
     print("last-turn-json:", lt_json)
 
     instr = None
@@ -540,19 +594,21 @@ def query_stream():
         "messages": built,
         "max_tokens": int(app.config["MAX_TOKENS"]),
         "temperature": 0.0,
-        "stream": True 
+        "stream": True,
     }
 
     def generate():
         assistant_full = []
-        with requests.post(CLAUDE_API_URL, headers=headers, json=payload, stream=True) as r:
+        with requests.post(
+            CLAUDE_API_URL, headers=headers, json=payload, stream=True, timeout=(5, 60)
+        ) as r:
             for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
                 if not chunk:
                     continue
                 for line in chunk.splitlines():
                     if not line.startswith("data:"):
                         continue
-                    data = line[len("data:"):].strip()
+                    data = line[len("data:") :].strip()
 
                     try:
                         evt = json.loads(data)
@@ -565,9 +621,9 @@ def query_stream():
                         print("❌ JSON parse error:", e)
                         print("   Raw line:", line)
                         pass
-                    
+
                     yield f"data: {data}\n\n"
-                
+
         yield "data: [DONE]\n\n"
 
         final_text = "".join(assistant_full).replace("\n", " ")
@@ -578,8 +634,12 @@ def query_stream():
         final_text = "".join(assistant_full).replace("\n", " ")
         if not skip_profile_ops:
             if user_text or final_text:
-                fut = bg.submit(_persist_interaction_async, device_id, user_text, final_text)
-                fut.add_done_callback(lambda _: bg.submit(prune_conversation, device_id))
+                fut = bg.submit(
+                    _persist_interaction_async, device_id, user_text, final_text
+                )
+                fut.add_done_callback(
+                    lambda _: bg.submit(prune_conversation, device_id)
+                )
             if user_text:
                 bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
@@ -599,19 +659,22 @@ def debug_chunks():
     try:
         rows = (
             db.query(ConvoChunk)
-              .filter(ConvoChunk.device_id == device_id)
-              .order_by(ConvoChunk.id.desc())
-              .limit(limit)
-              .all()
+            .filter(ConvoChunk.device_id == device_id)
+            .order_by(ConvoChunk.id.desc())
+            .limit(limit)
+            .all()
         )
 
-        out = [{
-            "id": r.id,
-            "device_id": r.device_id,
-            "role": r.role,
-            "text": r.text,
-            "ts": r.ts.replace(microsecond=0).isoformat() if r.ts else None
-        } for r in rows]
+        out = [
+            {
+                "id": r.id,
+                "device_id": r.device_id,
+                "role": r.role,
+                "text": r.text,
+                "ts": r.ts.replace(microsecond=0).isoformat() if r.ts else None,
+            }
+            for r in rows
+        ]
         return jsonify(out)
     finally:
         db.close()
@@ -621,15 +684,22 @@ def debug_chunks():
 @app.get("/debug/config")
 def debug_config():
     import os
-    return jsonify({
-        "root_config_exists": os.path.exists(os.path.join(app.root_path, "config.py")),
-        "instance_config_exists": os.path.exists(os.path.join(app.instance_path, "config.py")),
-        "has_api_key": bool(API_KEY),
-        "instance_path": app.instance_path,
-        "root_path": app.root_path,
-        "model": app.config.get("ANTHROPIC_MODEL"),
-        "db_url": app.config.get("DB_URL"),
-    })
+
+    return jsonify(
+        {
+            "root_config_exists": os.path.exists(
+                os.path.join(app.root_path, "config.py")
+            ),
+            "instance_config_exists": os.path.exists(
+                os.path.join(app.instance_path, "config.py")
+            ),
+            "has_api_key": bool(API_KEY),
+            "instance_path": app.instance_path,
+            "root_path": app.root_path,
+            "model": app.config.get("ANTHROPIC_MODEL"),
+            "db_url": app.config.get("DB_URL"),
+        }
+    )
 
 
 # Clean device id
@@ -643,9 +713,13 @@ def load_profile(device_id: str) -> dict:
     path = profile_path(device_id)
     if not os.path.exists(path):
         return {
-            "name": None, "age": None, "gender": None,
-            "likes": [], "dislikes": [],
-            "parent_name": None, "pronouns": None
+            "name": None,
+            "age": None,
+            "gender": None,
+            "likes": [],
+            "dislikes": [],
+            "parent_name": None,
+            "pronouns": None,
         }
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -705,10 +779,14 @@ def save_profile(device_id: str, patch: dict) -> dict:
                 continue
             merged[k] = v
 
-    merged["core_collected"] = all(bool(merged.get(k)) for k in ("name", "age", "gender"))
+    merged["core_collected"] = all(
+        bool(merged.get(k)) for k in ("name", "age", "gender")
+    )
 
     path = profile_path(device_id)
-    tmp_fd, tmp_path = tempfile.mkstemp(prefix="profile_", suffix=".json", dir=PROFILES_DIR)
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix="profile_", suffix=".json", dir=PROFILES_DIR
+    )
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             json.dump(merged, f, ensure_ascii=False, indent=2)
@@ -722,9 +800,12 @@ def save_profile(device_id: str, patch: dict) -> dict:
 
     return merged
 
+
 # Create user profile to context
 def format_profile_for_system(p: dict) -> str:
-    name = p.get("name"); age = p.get("age"); gender = p.get("gender")
+    name = p.get("name")
+    age = p.get("age")
+    gender = p.get("gender")
     return f"פרופיל משתמש: שם: {name or 'לא ידוע'}, גיל: {age or 'לא ידוע'}, מגדר: {gender or 'לא ידוע'}."
 
 
@@ -739,30 +820,30 @@ def get_profile():
 def prune_conversation(device_id: str):
     db = SessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        total = db.query(ConvoChunk).filter(ConvoChunk.device_id == device_id).count()
 
+        if total <= MAX_HISTORY:
+            return  # אין צורך למחוק
+
+        # קח את ה־MAX_HISTORY האחרונות (לפי id יורד = החדשות ביותר)
         keep_rows = (
             db.query(ConvoChunk.id)
-              .filter(ConvoChunk.device_id == device_id)
-              .order_by(ConvoChunk.id.desc())
-              .limit(10)
-              .all()
+            .filter(ConvoChunk.device_id == device_id)
+            .order_by(ConvoChunk.id.desc())
+            .limit(MAX_HISTORY)
+            .all()
         )
-        keep_ids = [r.id for r in keep_rows] or [-1] 
 
-        if keep_ids:
-            db.query(ConvoChunk).filter(
-                ConvoChunk.device_id == device_id,
-                and_(ConvoChunk.ts < cutoff, ~ConvoChunk.id.in_(keep_ids))
-            ).delete(synchronize_session=False)
-        else:
-            db.query(ConvoChunk).filter(
-                ConvoChunk.device_id == device_id,
-                ConvoChunk.ts < cutoff
-            ).delete(synchronize_session=False)
+        keep_ids = [r.id for r in keep_rows]
+
+        # מחק כל מה שלא בתוך ה־MAX_HISTORY האחרונות
+        db.query(ConvoChunk).filter(
+            ConvoChunk.device_id == device_id,
+            ~ConvoChunk.id.in_(keep_ids),
+        ).delete(synchronize_session=False)
 
         db.commit()
-        print("delete successfully")
+        print(f"Pruned conversation. Kept last {MAX_HISTORY} messages.")
     finally:
         db.close()
 
@@ -772,9 +853,11 @@ def prune_conversation(device_id: str):
 def upsert_profile():
     data = request.get_json(force=True) or {}
     device_id = (data.get("device_id") or "dev").strip()
-    profile_patch = data.get("profile") if isinstance(data.get("profile"), dict) else {
-        k: v for k, v in data.items() if k in _ALLOWED_PROFILE_KEYS
-    }
+    profile_patch = (
+        data.get("profile")
+        if isinstance(data.get("profile"), dict)
+        else {k: v for k, v in data.items() if k in _ALLOWED_PROFILE_KEYS}
+    )
     if not profile_patch:
         return jsonify({"error": "no profile fields provided"}), 400
     merged = save_profile(device_id, profile_patch)
@@ -784,7 +867,9 @@ def upsert_profile():
 # Extracting profile from user - in background
 def _maybe_extract_profile_async(device_id: str, user_text: str, current_profile: dict):
     miss = [k for k in ("name", "age", "gender") if not current_profile.get(k)]
-    should_try = bool(miss) or any(not current_profile.get(k) for k in ("likes", "dislikes"))
+    should_try = bool(miss) or any(
+        not current_profile.get(k) for k in ("likes", "dislikes")
+    )
     if not should_try or not user_text:
         return
 
@@ -792,7 +877,7 @@ def _maybe_extract_profile_async(device_id: str, user_text: str, current_profile
 
     extractor_system = (
         "אתה מחלץ פרטי פרופיל מילד מטקסט חופשי. החזר JSON חוקי בלבד, ללא טקסט נוסף. "
-        "השדות המותרים: name (string), age (int), gender (\"בן\"/\"בת\"/null), "
+        'השדות המותרים: name (string), age (int), gender ("בן"/"בת"/null), '
         "likes (list of strings), dislikes (list of strings). "
         "אם לא בטוח — השאר null/רשימה ריקה."
     )
@@ -805,7 +890,7 @@ def _maybe_extract_profile_async(device_id: str, user_text: str, current_profile
         "messages": extractor_messages,
         "max_tokens": 180,
         "temperature": 0.0,
-        "stream": False
+        "stream": False,
     }
     try:
         resp = http.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=(4, 15))
@@ -828,5 +913,128 @@ def _maybe_extract_profile_async(device_id: str, user_text: str, current_profile
     except Exception:
         pass
 
-if __name__ == '__main__':
+
+# Get user history to summary
+def get_recent_conversation(device_id: str) -> str:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(ConvoChunk)
+            .filter(ConvoChunk.device_id == device_id)
+            .order_by(ConvoChunk.id.desc())
+            .limit(MAX_HISTORY)
+            .all()
+        )
+    finally:
+        db.close()
+
+    if not rows:
+        return ""
+
+    rows = list(reversed(rows))
+
+    lines = []
+    for r in rows:
+        role = "משתמש" if r.role == "user" else "פנדי"
+        text = (r.text or "").strip()
+        if text:
+            lines.append(f"{role}: {text}")
+
+    return "\n".join(lines)
+
+
+# Summary qurey
+@app.post("/generate_parents_summary")
+def generate_parents_summary():
+    if not API_KEY:
+        return jsonify({"error": "API KEY not configured"}), 500
+
+    data = request.get_json(force=True) or {}
+    device_id = (data.get("device_id") or "").strip()
+    language = (data.get("language") or "HE").upper()
+
+    if not device_id:
+        return jsonify(
+            {"status": "no_data", "message": "משתמש חדש. אין עדיין נתונים ליצירת דו״ח."}
+        )
+
+    conversation_text = get_recent_conversation(device_id)
+
+    if not conversation_text:
+        return jsonify(
+            {"status": "no_data", "message": "אין עדיין מספיק שיחות ליצירת דו״ח רגשי."}
+        )
+
+    headers = anthropic_headers()
+    profile = load_profile(device_id)
+
+    profile_text = (
+        f"פרופיל הילד:\n"
+        f"שם: {profile.get('name') or 'לא ידוע'}\n"
+        f"גיל: {profile.get('age') or 'לא ידוע'}\n"
+        f"מגדר: {profile.get('gender') or 'לא ידוע'}\n"
+        f"אוהב: {', '.join(profile.get('likes') or []) or 'לא ידוע'}\n"
+        f"לא אוהב: {', '.join(profile.get('dislikes') or []) or 'לא ידוע'}\n"
+    )
+
+    combined_input = profile_text + "\n\nהיסטוריית שיחה:\n" + conversation_text[:12000]
+
+    lang_map = {"HE": "עברית", "EN": "English", "AR": "العربية", "RO": "Română"}
+
+    lang_name = lang_map.get(language, "עברית")
+
+    summary_system = (
+        SUMMARY_P_HE.strip() + f"\n\nהשפה המבוקשת לסיכום היא: {lang_name}.\n"
+        "כתוב את כל הסיכום בשפה זו בלבד."
+    )
+
+    payload = {
+        "model": app.config["ANTHROPIC_MODEL"],
+        "system": [{"type": "text", "text": summary_system}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": combined_input}],
+            }
+        ],
+        "max_tokens": 800,
+        "temperature": 0.2,
+        "stream": True,
+    }
+
+    def generate():
+        assistant_full = []
+
+        with requests.post(
+            CLAUDE_API_URL, headers=headers, json=payload, stream=True, timeout=(5, 60)
+        ) as r:
+
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+
+                chunk = line[len("data:") :].strip()
+
+                try:
+                    evt = json.loads(chunk)
+
+                    if evt.get("type") == "content_block_delta":
+                        piece = evt.get("delta", {}).get("text", "")
+                        if piece:
+                            assistant_full.append(piece)
+
+                except Exception:
+                    pass
+
+                yield f"data: {chunk}\n\n"
+
+        final_text = "".join(assistant_full).replace("\n", " ")
+        print("FINAL SUMMARY:\n", final_text)
+
+        yield "data: [DONE]\n\n"
+
+    return app.response_class(generate(), mimetype="text/event-stream")
+
+
+if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=int(app.config["PORT"]))
