@@ -724,6 +724,84 @@ def query_stream():
     return app.response_class(generate(), mimetype="text/event-stream")
 
 
+@app.post("/generate-project-title")
+def generate_project_title():
+    if not API_KEY:
+        return jsonify({"error": "API_KEY not configured"}), 500
+
+    data = request.get_json(force=True) or {}
+    language = (data.get("language") or "HE").upper()
+    user_message = (data.get("user_message") or "").strip()
+    assistant_response = (data.get("assistant_response") or "").strip()
+    device_id = (data.get("device_id") or "URBANX").strip()
+
+    if not user_message or not assistant_response:
+        return jsonify({"error": "missing user_message or assistant_response"}), 400
+
+    PROMPT = (
+        "צור שם קצר, מקצועי וברור לפרויקט.\n"
+        "החזר רק כותרת קצרה של 2–5 מילים.\n"
+        "בלי סימני פיסוק, בלי מרכאות, בלי הסברים."
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"הודעת משתמש:\n{user_message}\n\nתשובת עוזר:\n{assistant_response}",
+                }
+            ],
+        }
+    ]
+
+    headers = anthropic_headers()
+    payload = {
+        "model": app.config["ANTHROPIC_MODEL"],
+        "system": [{"type": "text", "text": PROMPT}],
+        "messages": messages,
+        "max_tokens": 40,
+        "temperature": 0.2,
+        "stream": False,
+    }
+
+    try:
+        r = requests.post(
+            CLAUDE_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=(4, 30),
+        )
+    except requests.RequestException as e:
+        return jsonify({"error": "LLM upstream error", "detail": str(e)}), 502
+
+    if r.status_code // 100 != 2:
+        try:
+            body = r.json()
+        except Exception:
+            body = {"raw": r.text[:500]}
+        return (
+            jsonify({"error": "LLM non-2xx", "status": r.status_code, "body": body}),
+            502,
+        )
+
+    try:
+        resp_json = r.json()
+        title = _extract_text_blocks(resp_json.get("content")).strip()
+    except Exception as e:
+        return jsonify({"error": "invalid LLM response", "detail": str(e)}), 502
+
+    title = re.sub(r'["“”\'`]+', "", title)
+    title = re.sub(r"[.,;:!?]+", "", title)
+    title = re.sub(r"\s+", " ", title).strip()
+
+    if not title:
+        return jsonify({"error": "empty title"}), 502
+
+    return jsonify({"title": title})
+
+
 ## Handle with images
 @app.route("/upload", methods=["POST"])
 def upload():
