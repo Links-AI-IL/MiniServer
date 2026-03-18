@@ -13,6 +13,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_
 from urllib3.util import Retry
 
+from io import BytesIO
+from PIL import Image
+import uuid
+import base64
+import fitz
+import pytesseract
+
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
@@ -25,6 +32,9 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "/var/data")
 
 PROFILES_DIR = os.path.join(DATA_ROOT, "profiles")
 os.makedirs(PROFILES_DIR, exist_ok=True)
+
+UPLOADS_DIR = os.path.join(DATA_ROOT, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 API_KEY = os.environ.get("CLAUDE_API_KEY")
 
@@ -136,6 +146,39 @@ SUMMARY_P_HE = """
 
     השפה של הסיכום חייבת להיות בהתאם לשפה המבוקשת בלבד.
     """
+
+PROMPT_URBANX = (
+    "You are UrbanX AI, a professional assistant for the construction, engineering, real estate, and infrastructure industries in Israel.\n\n"
+    "You assist professionals such as contractors, engineers, architects, developers, project managers, appraisers, and real estate brokers.\n"
+    "Your role includes helping with planning, analysis, documentation, reports, and decision-making related to:\n"
+    "- Construction and infrastructure projects\n"
+    "- Engineering and architectural planning\n"
+    "- Quantity takeoffs and bills of quantities\n"
+    "- Project feasibility and cost analysis\n"
+    "- Bureaucratic, regulatory, and permitting processes\n"
+    "- Legal and contractual considerations under current Israeli law\n"
+    "- Professional reports and structured documents\n\n"
+    "You must strictly follow these rules:\n"
+    "- Always respond in the same language as the user.\n"
+    "- If the user writes in Hebrew, write in clear, professional Hebrew WITHOUT diacritics.\n"
+    "- Maintain a factual, precise, and professional tone.\n"
+    "- Do NOT use emojis.\n"
+    "- Do NOT add personal opinions or emotional language.\n"
+    "- Do NOT mention being an AI or explain internal reasoning.\n\n"
+    "Context handling:\n"
+    "- You receive the full conversation history and must treat this as an ongoing project.\n"
+    "- Maintain continuity with previously discussed topics, assumptions, and decisions.\n"
+    "- Do not restate information unless necessary for clarity.\n\n"
+    "Output guidelines:\n"
+    "- Prefer structured answers: sections, bullet points, or tables when appropriate.\n"
+    "- When generating reports or documents, use professional headings and formatting.\n"
+    "- Base all answers on current Israeli standards, regulations, and professional practice.\n\n"
+    "Project title generation:\n"
+    "If explicitly asked to generate or suggest a project name or title:\n"
+    "- Return ONLY a short, professional title (2–5 words).\n"
+    "- The title must reflect the project’s purpose or domain.\n"
+    "- Do NOT include punctuation, quotation marks, explanations, or additional text."
+)
 
 # retry = Retry(
 #     total=2,
@@ -378,11 +421,18 @@ def query():
     if not built:
         return jsonify({"error": "missing messages or question"}), 400
 
+    try:
+        built = prepare_message_object(built)
+    except Exception as e:
+        print(f"prepare_message_object failed: {e}")
+
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
     if device_id == "mylo":
         Specific_prompt = PROMPT_MYLO
+    elif device_id == "URBANX":
+        Specific_prompt = PROMPT_URBANX
     elif language == "AR":
         Specific_prompt = PROMPT_AR
     elif language == "EN":
@@ -394,6 +444,9 @@ def query():
 
     if device_id == "mylo":
         profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MILO."
+        skip_profile_ops = True
+    elif device_id == "URBANX":
+        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית URBANX."
         skip_profile_ops = True
     else:
         profile_ctx = format_profile_for_system(profile)
@@ -407,7 +460,7 @@ def query():
     recent_messages = data.get("recent_messages")
     lt_json = None
     if (
-        device_id.lower() == "mylo"
+        device_id.lower() in {"mylo", "urbanx"}
         and isinstance(recent_messages, list)
         and recent_messages
     ):
@@ -545,11 +598,18 @@ def query_stream():
     if not built:
         return jsonify({"error": "missing messages or question"}), 400
 
+    try:
+        built = prepare_message_object(built)
+    except Exception as e:
+        print(f"prepare_message_object failed: {e}")
+
     profile = load_profile(device_id)
     profile["device_id"] = device_id
 
     if device_id == "mylo":
         Specific_prompt = PROMPT_MYLO
+    elif device_id == "URBANX":
+        Specific_prompt = PROMPT_URBANX
     elif language == "AR":
         Specific_prompt = PROMPT_AR
     elif language == "EN":
@@ -561,6 +621,9 @@ def query_stream():
 
     if device_id == "mylo":
         profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית MILO."
+        skip_profile_ops = True
+    elif device_id == "URBANX":
+        profile_ctx = "פרופיל משתמש כללי: משתמש באפליקציית URBANX."
         skip_profile_ops = True
     else:
         profile_ctx = format_profile_for_system(profile)
@@ -574,7 +637,7 @@ def query_stream():
     recent_messages = data.get("recent_messages")
     lt_json = None
     if (
-        device_id.lower() == "mylo"
+        device_id.lower() in {"mylo", "urbanx"}
         and isinstance(recent_messages, list)
         and recent_messages
     ):
@@ -659,6 +722,115 @@ def query_stream():
                 bg.submit(_maybe_extract_profile_async, device_id, user_text, profile)
 
     return app.response_class(generate(), mimetype="text/event-stream")
+
+
+## Handle with images
+@app.route("/upload", methods=["POST"])
+def upload():
+    response = {"status": -1}
+    try:
+        file = request.files["file"].read()
+        file_id = str(uuid.uuid4())
+        print(f"File ID: {file_id}")
+
+        path = os.path.join(UPLOADS_DIR, file_id)
+        with open(path, "wb") as saved_file:
+            saved_file.write(file)
+
+        print("File saved at:", os.path.abspath(path))
+        response.update({"status": 0, "id": file_id})
+    except Exception as error:
+        print(f"Error while uploading file: {error}")
+
+    return jsonify(response)
+
+
+@app.route("/ocr", methods=["POST"])
+def ocr():
+    print("OCR")
+    files = request.files.getlist("files")
+    print(f"Files: {files}")
+
+    try:
+        text = "המשתמש שלח מספר תמונות.\n"
+        for x in range(len(files)):
+            text += f"תמונה מספר {x+1}: {image_ocr(files[x])}\n"
+        print(f"text: {text}")
+    except Exception as error:
+        print(f"OCR failed: {error}")
+        text = ""
+
+    return text
+
+
+## Handle with files
+def get_file_from_id(file_id: str):
+    path = os.path.join(UPLOADS_DIR, str(file_id))
+    with open(path, "rb") as file:
+        encoded_file = base64.b64encode(file.read())
+    return encoded_file
+
+
+def image_ocr(file):
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+    print("📸 Running OCR...")
+    image = Image.open(file).convert("RGB")
+    text = pytesseract.image_to_string(image, lang="heb")
+    print(f"📝 OCR TEXT: {text[:100]}...")
+    return text
+
+
+def pdf_to_text(file):
+    pdf_document = fitz.open(stream=file.read(), filetype="pdf")
+    extracted_text = ""
+
+    for page_number in range(len(pdf_document)):
+        page = pdf_document[page_number]
+        extracted_text += page.get_text()
+
+    return extracted_text
+
+
+def prepare_message_object(message_object):
+    last_non_text_index = None
+
+    for i in range(len(message_object)):
+        content = message_object[i].get("content")
+        if isinstance(content, list) and len(content) > 0:
+            first_content = content[0]
+            if first_content.get("type") != "text":
+                last_non_text_index = i
+
+    for i in range(len(message_object)):
+        content = message_object[i].get("content")
+        if isinstance(content, list) and len(content) > 0:
+            first_content = content[0]
+
+            if first_content.get("type") != "text":
+                if i == last_non_text_index:
+                    file_id = first_content.get("source", {}).get("data")
+                    media_type = first_content.get("source", {}).get("media_type")
+
+                    if file_id:
+                        file_data = get_file_from_id(file_id)
+
+                        if media_type == "application/pdf":
+                            pdf_stream = BytesIO(base64.b64decode(file_data))
+                            extracted_text = pdf_to_text(pdf_stream)
+
+                            first_content["type"] = "text"
+                            first_content["text"] = extracted_text
+                            first_content.pop("source", None)
+
+                        else:
+                            first_content["source"]["data"] = file_data.decode("utf-8")
+
+                else:
+                    first_content.pop("source", None)
+                    first_content["type"] = "text"
+                    first_content["text"] = "**קובץ שנמחק**"
+
+    return message_object
 
 
 # Debug last message
@@ -838,9 +1010,8 @@ def prune_conversation(device_id: str):
         total = db.query(ConvoChunk).filter(ConvoChunk.device_id == device_id).count()
 
         if total <= MAX_HISTORY:
-            return  # אין צורך למחוק
+            return
 
-        # קח את ה־MAX_HISTORY האחרונות (לפי id יורד = החדשות ביותר)
         keep_rows = (
             db.query(ConvoChunk.id)
             .filter(ConvoChunk.device_id == device_id)
