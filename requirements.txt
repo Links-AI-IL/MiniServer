@@ -6,3 +6,6 @@ gunicorn>=21.2.0
 pytz
 typing-extensions>=4.6.0
 setuptools>=65
+Pillow
+PyMuPDF
+pytesseract
