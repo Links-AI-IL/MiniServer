@@ -680,27 +680,29 @@ def query_stream():
         with requests.post(
             CLAUDE_API_URL, headers=headers, json=payload, stream=True, timeout=(5, 60)
         ) as r:
-            for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
-                if not chunk:
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
                     continue
-                for line in chunk.splitlines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[len("data:") :].strip()
 
-                    try:
-                        evt = json.loads(data)
-                        if evt.get("type") == "content_block_delta":
-                            piece = evt.get("delta", {}).get("text", "")
-                            if piece:
-                                assistant_full.append(piece)
+                data = line[len("data:"):].strip()
 
-                    except Exception as e:
-                        print("❌ JSON parse error:", e)
-                        print("   Raw line:", line)
-                        pass
+                if data == "[DONE]":
+                    break
 
-                    yield f"data: {data}\n\n"
+                try:
+                    evt = json.loads(data)
+                    print("EVENT TYPE:", evt.get("type"))
+
+                    if evt.get("type") == "content_block_delta":
+                        piece = evt.get("delta", {}).get("text", "")
+                        if piece:
+                            assistant_full.append(piece)
+
+                except Exception as e:
+                    print("❌ JSON parse error:", e)
+                    print("RAW:", data)
+
+                yield f"data: {data}\n\n"
 
         yield "data: [DONE]\n\n"
 
